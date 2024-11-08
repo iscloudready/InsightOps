@@ -1,0 +1,6 @@
+@OrderService_HostAddress = http://localhost:5246
+
+GET {{OrderService_HostAddress}}/Orders/
+Accept: application/json
+
+###

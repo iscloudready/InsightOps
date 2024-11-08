@@ -1,0 +1,76 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: demo_user
+      POSTGRES_PASSWORD: demo_password
+      POSTGRES_DB: demo_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - demo-network
+      
+  frontend:
+    build: ./FrontendService
+    ports:
+      - "5000:80"
+
+  api_gateway:
+    build: ./ApiGateway
+    ports:
+      - "5001:80"
+
+  order_service:
+    build: ./OrderService
+    ports:
+      - "5002:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__Postgres=Host=postgres;Database=demo_db;Username=demo_user;Password=demo_password
+    depends_on:
+      - postgres
+    networks:
+      - demo-network
+
+  inventory_service:
+    build: ./InventoryService
+    ports:
+      - "5003:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__Postgres=Host=postgres;Database=demo_db;Username=demo_user;Password=demo_password
+    depends_on:
+      - postgres
+    networks:
+      - demo-network
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  loki:
+    image: grafana/loki:2.4.1
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./loki-config.yaml:/etc/loki/local-config.yaml
+
+  tempo:
+    image: grafana/tempo:1.2.1
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+
+volumes:
+  postgres_data:
+
+networks:
+  demo-network:
+    driver: bridge
