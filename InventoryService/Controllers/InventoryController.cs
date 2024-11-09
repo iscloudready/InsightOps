@@ -1,6 +1,9 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿// InventoryController.cs
+using Microsoft.AspNetCore.Mvc;
 using InventoryService.Models;
 using InventoryService.Repositories;
+using System.Threading.Tasks;
+using System.Linq;
 
 namespace InventoryService.Controllers
 {
@@ -16,25 +19,25 @@ namespace InventoryService.Controllers
         }
 
         [HttpGet]
-        public IActionResult GetAllItems()
+        public async Task<IActionResult> GetAllItems()
         {
-            return Ok(_repository.GetAllItems());
+            var items = await _repository.GetAllItems();
+            return Ok(items);
         }
 
         [HttpGet("{id}")]
-        public IActionResult GetItemById(int id)
+        public async Task<IActionResult> GetItemById(int id)
         {
-            var item = _repository.GetItemById(id);
+            var item = await _repository.GetItemById(id);
             if (item == null) return NotFound();
             return Ok(item);
         }
 
         [HttpPost]
-        public IActionResult CreateItem([FromBody] InventoryItem item)
+        public async Task<IActionResult> CreateItem([FromBody] InventoryItem item)
         {
-            item.Id = _repository.GetAllItems().Count() + 1;
-            _repository.AddItem(item);
-            return CreatedAtAction(nameof(GetItemById), new { id = item.Id }, item);
+            var createdItem = await _repository.AddItem(item);
+            return CreatedAtAction(nameof(GetItemById), new { id = createdItem.Id }, createdItem);
         }
     }
 }

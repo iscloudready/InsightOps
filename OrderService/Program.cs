@@ -3,14 +3,24 @@ using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using OpenTelemetry.Resources;
-using OrderService.Data;
 using OrderService.Repositories;
+using Microsoft.AspNetCore.Diagnostics;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure PostgreSQL Database connection
+// Configure PostgreSQL Database connection with retry policy
 builder.Services.AddDbContext<OrderDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")));
+{
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres"),
+        npgsqlOptionsAction: sqlOptions =>
+        {
+            sqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(30),
+                errorCodesToAdd: null);
+        });
+});
 
 // Add OrderRepository as a scoped service
 builder.Services.AddScoped<OrderRepository>();
@@ -54,6 +64,37 @@ builder.Services.AddOpenTelemetry()
 
 // Build and configure the app
 var app = builder.Build();
+
+// Ensure database is created and migrated
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    try
+    {
+        var context = services.GetRequiredService<OrderDbContext>();
+        context.Database.EnsureCreated();
+    }
+    catch (Exception ex)
+    {
+        var logger = services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "An error occurred while creating/migrating the database.");
+    }
+}
+
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        context.Response.StatusCode = 500;
+        context.Response.ContentType = "application/json";
+        var error = context.Features.Get<IExceptionHandlerFeature>();
+        if (error != null)
+        {
+            await context.Response.WriteAsync(
+                JsonSerializer.Serialize(new { error = "An error occurred." }));
+        }
+    });
+});
 
 // Map Prometheus endpoint for scraping metrics
 app.MapPrometheusScrapingEndpoint("/metrics");

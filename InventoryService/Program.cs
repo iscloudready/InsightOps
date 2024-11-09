@@ -5,7 +5,6 @@ using OpenTelemetry.Trace;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Instrumentation.Runtime; // Add runtime instrumentation
 using OpenTelemetry.Exporter.Prometheus;
-using InventoryService.Data;
 using InventoryService.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);

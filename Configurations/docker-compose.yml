@@ -2,6 +2,7 @@ version: '3.8'
 services:
   postgres:
     image: postgres:13
+    container_name: postgres
     environment:
       POSTGRES_USER: demo_user
       POSTGRES_PASSWORD: demo_password
@@ -12,64 +13,133 @@ services:
       - "5432:5432"
     networks:
       - demo-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo_user -d demo_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
       
   frontend:
-    build: ./FrontendService
+    build: 
+      context: ./FrontendService
+      dockerfile: Dockerfile
+    container_name: frontend
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ApiGateway__Url=http://api_gateway
     ports:
       - "5000:80"
+    depends_on:
+      - api_gateway
+    networks:
+      - demo-network
 
   api_gateway:
-    build: ./ApiGateway
+    build: 
+      context: ./ApiGateway
+      dockerfile: Dockerfile
+    container_name: api_gateway
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Services__OrderService=http://order_service
+      - Services__InventoryService=http://inventory_service
     ports:
       - "5001:80"
+    depends_on:
+      - order_service
+      - inventory_service
+    networks:
+      - demo-network
 
   order_service:
-    build: ./OrderService
+    build: 
+      context: ./OrderService
+      dockerfile: Dockerfile
+    container_name: order_service
     ports:
       - "5002:80"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__Postgres=Host=postgres;Database=demo_db;Username=demo_user;Password=demo_password
+      - OpenTelemetry__Tempo=http://tempo:4317
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - demo-network
 
   inventory_service:
-    build: ./InventoryService
+    build: 
+      context: ./InventoryService
+      dockerfile: Dockerfile
+    container_name: inventory_service
     ports:
       - "5003:80"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__Postgres=Host=postgres;Database=demo_db;Username=demo_user;Password=demo_password
+      - OpenTelemetry__Tempo=http://tempo:4317
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - demo-network
 
   prometheus:
     image: prom/prometheus
+    container_name: prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - "9090:9090"
+    networks:
+      - demo-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    networks:
+      - demo-network
 
   loki:
     image: grafana/loki:2.4.1
+    container_name: loki
     ports:
       - "3100:3100"
     command: -config.file=/etc/loki/local-config.yaml
     volumes:
       - ./loki-config.yaml:/etc/loki/local-config.yaml
+    networks:
+      - demo-network
 
   tempo:
     image: grafana/tempo:1.2.1
+    container_name: tempo
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
     ports:
-      - "4317:4317"
-      - "4318:4318"
+      - "4317:4317"  # OTLP gRPC
+      - "4318:4318"  # OTLP HTTP
+    networks:
+      - demo-network
 
 volumes:
   postgres_data:
+  grafana_data:
 
 networks:
   demo-network:

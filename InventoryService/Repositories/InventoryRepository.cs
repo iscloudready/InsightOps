@@ -1,17 +1,29 @@
-﻿using System.Collections.Generic;
-using System.Linq;
+﻿// Updated InventoryRepository
 using InventoryService.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace InventoryService.Repositories
 {
     public class InventoryRepository
     {
-        private readonly List<InventoryItem> _items = new List<InventoryItem>();
+        private readonly InventoryDbContext _context;
 
-        public IEnumerable<InventoryItem> GetAllItems() => _items;
+        public InventoryRepository(InventoryDbContext context)
+        {
+            _context = context;
+        }
 
-        public InventoryItem GetItemById(int id) => _items.FirstOrDefault(i => i.Id == id);
+        public async Task<IEnumerable<InventoryItem>> GetAllItems()
+            => await _context.InventoryItems.ToListAsync();
 
-        public void AddItem(InventoryItem item) => _items.Add(item);
+        public async Task<InventoryItem> GetItemById(int id)
+            => await _context.InventoryItems.FindAsync(id);
+
+        public async Task<InventoryItem> AddItem(InventoryItem item)
+        {
+            _context.InventoryItems.Add(item);
+            await _context.SaveChangesAsync();
+            return item;
+        }
     }
 }

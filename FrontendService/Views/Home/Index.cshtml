@@ -180,25 +180,57 @@
 </div>
 
 @section Scripts {
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/js/all.min.js"></script>
-    <script>
-        // Placeholder for real-time updates
-        function updateDashboard() {
-            // This would be replaced with real API calls to your microservices
-            // For demo purposes, we'll update with random data
-            document.getElementById('activeOrdersCount').textContent = Math.floor(Math.random() * 100);
-            document.getElementById('inventoryCount').textContent = Math.floor(Math.random() * 1000);
-            document.getElementById('systemHealth').textContent = '98%';
-            document.getElementById('responseTime').textContent = Math.floor(Math.random() * 100) + 'ms';
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/js/all.min.js"></script>
+        <script>
+            async function updateDashboard() {
+                try {
+                    // Fetch dashboard data
+                    const dashboardResponse = await fetch('/Home/GetDashboardData');
+                    if (dashboardResponse.ok) {
+                        const dashboardData = await dashboardResponse.json();
 
-            // Update progress bars
-            document.getElementById('cpuUsage').style.width = Math.floor(Math.random() * 100) + '%';
-            document.getElementById('memoryUsage').style.width = Math.floor(Math.random() * 100) + '%';
-            document.getElementById('storageUsage').style.width = Math.floor(Math.random() * 100) + '%';
-        }
+                        // Update dashboard metrics
+                        document.getElementById('activeOrdersCount').textContent = dashboardData.activeOrders;
+                        document.getElementById('inventoryCount').textContent = dashboardData.inventoryCount;
+                        document.getElementById('systemHealth').textContent = dashboardData.systemHealth;
+                        document.getElementById('responseTime').textContent = dashboardData.responseTime;
+                    }
 
-        // Update every 5 seconds
-        setInterval(updateDashboard, 5000);
-        updateDashboard(); // Initial update
-    </script>
+                    // Fetch service status
+                    const statusResponse = await fetch('/Home/GetServiceStatus');
+                    if (statusResponse.ok) {
+                        const serviceStatus = await statusResponse.json();
+
+                        // Update service status table
+                        serviceStatus.forEach(service => {
+                            const row = document.querySelector(`tr:has(td:contains('${service.name}'))`);
+                            if (row) {
+                                const statusBadge = row.querySelector('.badge');
+                                statusBadge.className = `badge bg-${service.status === 'Healthy' ? 'success' : 'danger'}`;
+                                statusBadge.textContent = service.status;
+
+                                const uptimeCell = row.querySelector(`#${service.name.toLowerCase().replace(' ', '')}ServiceUptime`);
+                                const lastUpdateCell = row.querySelector(`#${service.name.toLowerCase().replace(' ', '')}ServiceLastUpdate`);
+
+                                // Calculate uptime
+                                uptimeCell.textContent = '100%'; // You can implement real uptime calculation
+                                lastUpdateCell.textContent = new Date(service.lastUpdated).toLocaleString();
+                            }
+                        });
+                    }
+
+                    // Update system resources (you can implement real metrics here)
+                    document.getElementById('cpuUsage').style.width = '60%';
+                    document.getElementById('memoryUsage').style.width = '45%';
+                    document.getElementById('storageUsage').style.width = '30%';
+
+                } catch (error) {
+                    console.error('Error updating dashboard:', error);
+                }
+            }
+
+            // Update every 5 seconds
+            setInterval(updateDashboard, 5000);
+            updateDashboard(); // Initial update
+        </script>
 }

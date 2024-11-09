@@ -1,6 +1,9 @@
+// OrdersController.cs
 using Microsoft.AspNetCore.Mvc;
 using OrderService.Models;
 using OrderService.Repositories;
+using System.Threading.Tasks;
+using System.Linq;
 
 namespace OrderService.Controllers
 {
@@ -16,26 +19,26 @@ namespace OrderService.Controllers
         }
 
         [HttpGet]
-        public IActionResult GetAllOrders()
+        public async Task<IActionResult> GetAllOrders()
         {
-            return Ok(_repository.GetAllOrders());
+            var orders = await _repository.GetAllOrders();
+            return Ok(orders);
         }
 
         [HttpGet("{id}")]
-        public IActionResult GetOrderById(int id)
+        public async Task<IActionResult> GetOrderById(int id)
         {
-            var order = _repository.GetOrderById(id);
+            var order = await _repository.GetOrderById(id);
             if (order == null) return NotFound();
             return Ok(order);
         }
 
         [HttpPost]
-        public IActionResult CreateOrder([FromBody] Order order)
+        public async Task<IActionResult> CreateOrder([FromBody] Order order)
         {
-            order.Id = _repository.GetAllOrders().Count() + 1;
             order.OrderDate = DateTime.UtcNow;
-            _repository.AddOrder(order);
-            return CreatedAtAction(nameof(GetOrderById), new { id = order.Id }, order);
+            var createdOrder = await _repository.AddOrder(order);
+            return CreatedAtAction(nameof(GetOrderById), new { id = createdOrder.Id }, createdOrder);
         }
     }
 }
