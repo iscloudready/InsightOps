@@ -1,6 +1,18 @@
 @OrderService_HostAddress = http://localhost:5246
 
-GET {{OrderService_HostAddress}}/Orders/
+### Retrieve All Orders
+GET {{OrderService_HostAddress}}/api/orders
 Accept: application/json
 
-###
+### Retrieve Order By ID
+GET {{OrderService_HostAddress}}/api/orders/1
+Accept: application/json
+
+### Create a New Order
+POST {{OrderService_HostAddress}}/api/orders
+Content-Type: application/json
+
+{
+    "itemName": "Test Item",
+    "quantity": 5
+}

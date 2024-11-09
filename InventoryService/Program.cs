@@ -17,6 +17,11 @@ builder.Services.AddDbContext<InventoryDbContext>(options =>
 // Add InventoryRepository as a scoped service
 builder.Services.AddScoped<InventoryRepository>();
 
+// Add Authorization services
+builder.Services.AddAuthorization();
+
+builder.Services.AddControllers();
+
 // Configure Swagger for API documentation
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

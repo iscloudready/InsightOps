@@ -1,8 +1,204 @@
 ﻿@{
-    ViewData["Title"] = "Home Page";
+    ViewData["Title"] = "Operations Dashboard";
 }
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
+<div class="container-fluid px-4">
+    <!-- Header Section -->
+    <div class="row my-4">
+        <div class="col-12">
+            <h1 class="display-5 fw-bold">Operations Control Center</h1>
+            <p class="lead text-muted">Microservices Health & Performance Monitoring</p>
+        </div>
+    </div>
+
+    <!-- Quick Stats Cards -->
+    <div class="row g-4 mb-4">
+        <div class="col-xl-3 col-md-6">
+            <div class="card border-left-primary h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs fw-bold text-primary text-uppercase mb-1">
+                                Active Orders
+                            </div>
+                            <div class="h5 mb-0 fw-bold text-gray-800" id="activeOrdersCount">
+                                <span class="placeholder-glow">
+                                    <span class="placeholder col-6"></span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-shopping-cart fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="card border-left-success h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs fw-bold text-success text-uppercase mb-1">
+                                Inventory Items
+                            </div>
+                            <div class="h5 mb-0 fw-bold text-gray-800" id="inventoryCount">
+                                <span class="placeholder-glow">
+                                    <span class="placeholder col-6"></span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-warehouse fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="card border-left-info h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs fw-bold text-info text-uppercase mb-1">
+                                System Health
+                            </div>
+                            <div class="h5 mb-0 fw-bold text-gray-800" id="systemHealth">
+                                <span class="placeholder-glow">
+                                    <span class="placeholder col-6"></span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-heartbeat fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="card border-left-warning h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs fw-bold text-warning text-uppercase mb-1">
+                                Response Time
+                            </div>
+                            <div class="h5 mb-0 fw-bold text-gray-800" id="responseTime">
+                                <span class="placeholder-glow">
+                                    <span class="placeholder col-6"></span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-tachometer-alt fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Service Status Section -->
+    <div class="row mb-4">
+        <div class="col-xl-8 col-lg-7">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                    <h6 class="m-0 fw-bold text-primary">Microservices Status</h6>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="servicesTable">
+                            <thead>
+                                <tr>
+                                    <th>Service</th>
+                                    <th>Status</th>
+                                    <th>Uptime</th>
+                                    <th>Last Updated</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Order Service</td>
+                                    <td><span class="badge bg-success">Healthy</span></td>
+                                    <td id="orderServiceUptime">-</td>
+                                    <td id="orderServiceLastUpdate">-</td>
+                                </tr>
+                                <tr>
+                                    <td>Inventory Service</td>
+                                    <td><span class="badge bg-success">Healthy</span></td>
+                                    <td id="inventoryServiceUptime">-</td>
+                                    <td id="inventoryServiceLastUpdate">-</td>
+                                </tr>
+                                <tr>
+                                    <td>Frontend Service</td>
+                                    <td><span class="badge bg-success">Healthy</span></td>
+                                    <td id="frontendServiceUptime">-</td>
+                                    <td id="frontendServiceLastUpdate">-</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-4 col-lg-5">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 fw-bold text-primary">System Resources</h6>
+                </div>
+                <div class="card-body">
+                    <div class="mb-4">
+                        <p class="mb-2">CPU Usage</p>
+                        <div class="progress">
+                            <div class="progress-bar" role="progressbar" style="width: 0%" id="cpuUsage"
+                                 aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <p class="mb-2">Memory Usage</p>
+                        <div class="progress">
+                            <div class="progress-bar bg-info" role="progressbar" style="width: 0%" id="memoryUsage"
+                                 aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <p class="mb-2">Storage Usage</p>
+                        <div class="progress">
+                            <div class="progress-bar bg-warning" role="progressbar" style="width: 0%" id="storageUsage"
+                                 aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/js/all.min.js"></script>
+    <script>
+        // Placeholder for real-time updates
+        function updateDashboard() {
+            // This would be replaced with real API calls to your microservices
+            // For demo purposes, we'll update with random data
+            document.getElementById('activeOrdersCount').textContent = Math.floor(Math.random() * 100);
+            document.getElementById('inventoryCount').textContent = Math.floor(Math.random() * 1000);
+            document.getElementById('systemHealth').textContent = '98%';
+            document.getElementById('responseTime').textContent = Math.floor(Math.random() * 100) + 'ms';
+
+            // Update progress bars
+            document.getElementById('cpuUsage').style.width = Math.floor(Math.random() * 100) + '%';
+            document.getElementById('memoryUsage').style.width = Math.floor(Math.random() * 100) + '%';
+            document.getElementById('storageUsage').style.width = Math.floor(Math.random() * 100) + '%';
+        }
+
+        // Update every 5 seconds
+        setInterval(updateDashboard, 5000);
+        updateDashboard(); // Initial update
+    </script>
+}

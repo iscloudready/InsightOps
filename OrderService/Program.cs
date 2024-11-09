@@ -15,6 +15,11 @@ builder.Services.AddDbContext<OrderDbContext>(options =>
 // Add OrderRepository as a scoped service
 builder.Services.AddScoped<OrderRepository>();
 
+// Add Authorization services
+builder.Services.AddAuthorization();
+
+builder.Services.AddControllers();
+
 // Configure Swagger
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
