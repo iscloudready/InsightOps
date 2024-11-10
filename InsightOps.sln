@@ -28,6 +28,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Documentations", "Documenta
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Scripts", "Scripts", "{40B47F99-0656-4A24-B78B-5D5C3955B27C}"
 	ProjectSection(SolutionItems) = preProject
+		scripts\bootstrap-docker-commands.ps1 = scripts\bootstrap-docker-commands.ps1
 		scripts\docker-commands.ps1 = scripts\docker-commands.ps1
 		scripts\docker-commands.sh = scripts\docker-commands.sh
 		scripts\init-insightops.ps1 = scripts\init-insightops.ps1

@@ -1,0 +1,45 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+rule_files:
+  - "rules/*.yml"
+
+scrape_configs:
+  - job_name: 'order_service'
+    static_configs:
+      - targets: ['${NAMESPACE:-insightops}_orders:80']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    honor_labels: true
+
+  - job_name: 'inventory_service'
+    static_configs:
+      - targets: ['${NAMESPACE:-insightops}_inventory:80']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    honor_labels: true
+
+  - job_name: 'frontend'
+    static_configs:
+      - targets: ['${NAMESPACE:-insightops}_frontend:80']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    honor_labels: true
+
+  - job_name: 'api_gateway'
+    static_configs:
+      - targets: ['${NAMESPACE:-insightops}_gateway:80']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    honor_labels: true
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: '/metrics'
+
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['${NAMESPACE:-insightops}_loki:3100']
