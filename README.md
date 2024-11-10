@@ -1,237 +1,335 @@
-# InsightOps
+# InsightOps - Enterprise Observability Demo
 
-**InsightOps** is an observability-driven project showcasing advanced monitoring and diagnostics in a microservices architecture. Built with .NET 8, this solution leverages OpenTelemetry, Prometheus, and Grafana for comprehensive observability.
+**InsightOps** is a comprehensive observability demo showcasing microservices monitoring using .NET 8, OpenTelemetry, Prometheus, Grafana, Loki, and Tempo. This project serves as both a learning tool and a production-ready template for enterprise observability.
+
+## Quick Start
+```powershell
+# Clone and run (Automated setup)
+git clone https://github.com/yourusername/InsightOps.git
+cd InsightOps
+./setup.ps1
+```
 
 ## Table of Contents
+- [Quick Start](#quick-start)
 - [Project Overview](#project-overview)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
-- [Installation](#installation)
+- [Detailed Installation](#detailed-installation)
 - [Configuration](#configuration)
 - [Running the Project](#running-the-project)
 - [Monitoring Setup](#monitoring-setup)
-- [Useful Commands](#useful-commands)
-- [Directory Structure](#directory-structure)
+- [Management Scripts](#management-scripts)
+- [Troubleshooting](#troubleshooting)
+- [Advanced Usage](#advanced-usage)
+- [Contributing](#contributing)
 
 ## Project Overview
 
-InsightOps demonstrates real-time metrics, tracing, and logging in an ASP.NET Core-based microservices environment. The services include:
-- Frontend Service (MVC)
-- API Gateway
-- Order Service
-- Inventory Service
-- Monitoring Stack (Prometheus, Grafana, Loki, Tempo)
+InsightOps demonstrates:
+- Real-time metrics collection and visualization
+- Distributed tracing across microservices
+- Centralized logging with structured data
+- Health monitoring and alerting
+- Auto-provisioned Grafana dashboards
+- Production-ready containerization
+
+### Key Components
+- Frontend Service (ASP.NET Core MVC)
+- API Gateway (Reverse Proxy)
+- Order Service (Microservice)
+- Inventory Service (Microservice)
+- PostgreSQL Database
+- Prometheus (Metrics)
+- Grafana (Visualization)
+- Loki (Logging)
+- Tempo (Tracing)
+
+## Architecture
+
+```mermaid
+graph TB
+    Client[Client] --> Frontend[Frontend Service]
+    Frontend --> Gateway[API Gateway]
+    Gateway --> OrderService[Order Service]
+    Gateway --> InventoryService[Inventory Service]
+    OrderService --> DB[(PostgreSQL)]
+    InventoryService --> DB
+    OrderService --> Prometheus[Prometheus]
+    InventoryService --> Prometheus
+    Frontend --> Prometheus
+    Gateway --> Prometheus
+    Prometheus --> Grafana[Grafana]
+    Loki[Loki] --> Grafana
+    Tempo[Tempo] --> Grafana
+```
 
 ## Prerequisites
 
-- .NET 8 SDK
-- Docker Desktop
-- Visual Studio 2022
-- PowerShell 7+ (recommended)
+### Required Software
+- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop)
+- [Visual Studio 2022](https://visualstudio.microsoft.com/vs/) (17.8 or later)
+- [PowerShell 7+](https://github.com/PowerShell/PowerShell/releases) (recommended)
+- [Git](https://git-scm.com/downloads)
 
-## Installation
+### Recommended VS Extensions
+- Docker VSCode Extension
+- C# Dev Kit
+- PowerShell Extension
 
-1. Clone the repository:
+### System Requirements
+- Windows 10/11 or WSL2
+- 16GB RAM minimum
+- 50GB free disk space
+- CPU with virtualization support
+
+## Detailed Installation
+
+### Step 1: Clone and Setup
 ```powershell
+# Clone repository
 git clone https://github.com/yourusername/InsightOps.git
 cd InsightOps
+
+# Create required directories and files
+./scripts/init-directories.ps1
 ```
 
-2. Create required directories:
+### Step 2: Install Dependencies
 ```powershell
-# Create Grafana provisioning directories
-New-Item -ItemType Directory -Force -Path "./Configurations/grafana/provisioning/datasources"
-New-Item -ItemType Directory -Force -Path "./Configurations/grafana/provisioning/dashboards"
+# Install required .NET packages
+./scripts/install-dependencies.ps1
 ```
 
-3. Set up Grafana dashboards:
+### Step 3: Configure Environment
 ```powershell
-# Copy dashboard configurations
-Set-Content -Path "./Configurations/grafana/provisioning/dashboards/dashboard.yml" -Value $dashboardConfig
-Set-Content -Path "./Configurations/grafana/provisioning/dashboards/service-overview.json" -Value $serviceOverviewDashboard
-Set-Content -Path "./Configurations/grafana/provisioning/dashboards/order-service.json" -Value $orderServiceDashboard
-Set-Content -Path "./Configurations/grafana/provisioning/dashboards/logs-overview.json" -Value $logsOverviewDashboard
-Set-Content -Path "./Configurations/grafana/provisioning/dashboards/system-metrics.json" -Value $systemMetricsDashboard
+# Set up configurations
+./scripts/configure-environment.ps1
 ```
+
+### Step 4: Create Monitoring Stack
+```powershell
+# Set up Grafana, Prometheus, Loki, and Tempo
+./scripts/setup-monitoring.ps1
+```
+
+## Project Structure
+```
+InsightOps/
+├── InsightOps.sln                      # Solution file
+├── scripts/                            # PowerShell automation scripts
+│   ├── init-directories.ps1            # Directory setup
+│   ├── install-dependencies.ps1        # Dependencies installation
+│   ├── configure-environment.ps1       # Environment configuration
+│   ├── setup-monitoring.ps1           # Monitoring stack setup
+│   └── docker-commands.ps1            # Docker management commands
+├── Configurations/                     # Configuration files
+│   ├── docker-compose.yml             # Container orchestration
+│   ├── prometheus.yml                 # Prometheus config
+│   ├── tempo.yaml                     # Tempo config
+│   ├── loki-config.yaml              # Loki config
+│   └── grafana/                      # Grafana configurations
+│       └── provisioning/             # Auto-provisioning
+│           ├── dashboards/           # Dashboard definitions
+│           └── datasources/          # Data source configs
+├── FrontendService/                  # MVC Frontend
+├── ApiGateway/                       # API Gateway
+├── OrderService/                     # Order microservice
+├── InventoryService/                 # Inventory microservice
+└── docs/                            # Documentation
+```
+
+## Service URLs and Ports
+
+| Service          | Development URL           | Production URL           | Notes                               |
+|------------------|--------------------------|-------------------------|-------------------------------------|
+| Frontend         | http://localhost:5010    | https://frontend:443   | Main application interface          |
+| API Gateway      | http://localhost:5011    | https://gateway:443    | API documentation (Swagger)         |
+| Order Service    | http://localhost:5012    | https://orders:443     | Order management endpoints          |
+| Inventory Service| http://localhost:5013    | https://inventory:443  | Inventory management endpoints      |
+| Grafana          | http://localhost:3001    | https://grafana:443    | Monitoring UI (admin/InsightOps2024!)|
+| Prometheus       | http://localhost:9091    | https://prometheus:443 | Metrics storage                     |
+| Loki             | http://localhost:3101    | https://loki:443      | Log aggregation                     |
+| Tempo            | http://localhost:4319    | https://tempo:443     | Distributed tracing                 |
 
 ## Running the Project
 
-1. Start all services:
+### Development Mode
 ```powershell
+# Start all services in development mode
 cd Configurations
-docker-compose up -d --build
+docker-compose -f docker-compose.dev.yml up -d
 ```
 
-2. Check service status:
+### Production Mode
 ```powershell
-docker-compose ps
+# Start all services in production mode
+cd Configurations
+docker-compose -f docker-compose.prod.yml up -d
 ```
 
-3. Monitor service logs:
+### Verify Services
 ```powershell
-# View logs for specific services
-docker logs insightops_frontend
-docker logs insightops_gateway
-docker logs insightops_orders
-docker logs insightops_inventory
-docker logs insightops_db
+# Open all services in default browser
+./scripts/open-services.ps1
 
-# Follow logs in real-time
-docker logs -f insightops_frontend
+# Check service health
+./scripts/check-health.ps1
 ```
 
-## Access Points
+## Monitoring Setup
 
-Launch these services in your browser:
+### Access Monitoring Stack
 ```powershell
-# Frontend Application
-Start-Process "http://localhost:5010"
+# Open Grafana
+Start-Process "http://localhost:3001"  # Login: admin/InsightOps2024!
 
-# API Gateway
-Start-Process "http://localhost:5011"
-
-# Order Service
-Start-Process "http://localhost:5012"
-
-# Inventory Service
-Start-Process "http://localhost:5013"
-
-# Grafana (admin/InsightOps2024!)
-Start-Process "http://localhost:3001"
-
-# Prometheus
+# Open Prometheus
 Start-Process "http://localhost:9091"
 
-# Loki
-Start-Process "http://localhost:3101"
+# View service metrics
+Start-Process "http://localhost:5012/metrics"  # Order Service
+Start-Process "http://localhost:5013/metrics"  # Inventory Service
 ```
 
-## Monitoring Stack
-
-### Grafana Dashboards
+### Pre-configured Dashboards
 1. Service Overview
-   - CPU and Memory usage
-   - Request rates and latencies
-   - Service health status
+   - Real-time service health
+   - Resource utilization
+   - Request metrics
 
 2. Order Service Dashboard
-   - Request durations
-   - Error rates
    - Order processing metrics
+   - Performance indicators
+   - Error tracking
 
 3. Logs Overview
    - Centralized logging
-   - Error tracking
-   - Service-specific filtering
+   - Error aggregation
+   - Log search and filtering
 
 4. System Metrics
-   - Infrastructure metrics
-   - Resource utilization
-   - System health
+   - Infrastructure health
+   - Resource monitoring
+   - Performance trends
 
-## Useful Commands
+## Management Scripts
 
 ### Docker Management
 ```powershell
-# Stop all services
-docker-compose down
+# Full management UI
+./scripts/docker-commands.ps1
 
-# Stop and remove everything (including volumes)
-docker-compose down -v
-
-# Rebuild specific service
-docker-compose up -d --build service_name
-
-# View container stats
-docker stats
-
-# Enter container shell
-docker exec -it container_name sh
-
-# Clean up Docker system
-docker system prune -f
+# Common commands
+docker-compose ps                    # List services
+docker-compose logs -f              # Follow all logs
+docker-compose restart service_name # Restart service
 ```
 
-### Service Management
+### Database Management
 ```powershell
-# Restart specific service
-docker-compose restart service_name
+# Connection strings
+$devConnString = "Host=localhost;Port=5433;Database=insightops_db;Username=insightops_user;Password=insightops_pwd"
+$prodConnString = "Host=insightops_db;Database=insightops_db;Username=insightops_user;Password=insightops_pwd"
 
-# View service logs
-docker-compose logs service_name
+# Backup database
+./scripts/backup-database.ps1
 
+# Restore database
+./scripts/restore-database.ps1
+```
+
+### Monitoring Management
+```powershell
+# Reset Grafana
+./scripts/reset-grafana.ps1
+
+# Update dashboards
+./scripts/update-dashboards.ps1
+
+# View metrics
+./scripts/view-metrics.ps1
+```
+
+## Troubleshooting
+
+### Common Issues
+1. Port Conflicts
+```powershell
+# Find conflicting ports
+./scripts/check-ports.ps1
+
+# Change ports
+./scripts/update-ports.ps1
+```
+
+2. Container Issues
+```powershell
+# Reset containers
+./scripts/reset-containers.ps1
+
+# Clean Docker system
+./scripts/clean-docker.ps1
+```
+
+3. Database Issues
+```powershell
+# Check database
+./scripts/check-database.ps1
+
+# Reset database
+./scripts/reset-database.ps1
+```
+
+## Advanced Usage
+
+### Custom Metrics
+```powershell
+# Add custom metrics
+./scripts/add-custom-metrics.ps1
+
+# Update Prometheus config
+./scripts/update-prometheus.ps1
+```
+
+### Scaling Services
+```powershell
 # Scale service
-docker-compose up -d --scale service_name=2
+docker-compose up -d --scale service_name=3
+
+# Load balancing
+./scripts/configure-loadbalancer.ps1
 ```
 
-### Monitoring Commands
+### Security
 ```powershell
-# Check service health
-curl http://localhost:5010/health
-curl http://localhost:5011/health
-curl http://localhost:5012/health
-curl http://localhost:5013/health
+# Enable SSL
+./scripts/enable-ssl.ps1
 
-# View Prometheus metrics
-curl http://localhost:5012/metrics
+# Update credentials
+./scripts/update-credentials.ps1
 ```
-
-## Directory Structure
-
-```
-InsightOps/
-├── InsightOps.sln
-├── Configurations/
-│   ├── docker-compose.yml
-│   ├── prometheus.yml
-│   ├── tempo.yaml
-│   ├── loki-config.yaml
-│   └── grafana/
-│       └── provisioning/
-│           ├── dashboards/
-│           │   ├── dashboard.yml
-│           │   ├── service-overview.json
-│           │   ├── order-service.json
-│           │   ├── logs-overview.json
-│           │   └── system-metrics.json
-│           └── datasources/
-│               └── datasources.yaml
-├── FrontendService/
-├── ApiGateway/
-├── OrderService/
-└── InventoryService/
-```
-
-## Database Connection
-
-```
-Host: localhost
-Port: 5433
-Database: insightops_db
-Username: insightops_user
-Password: insightops_pwd
-```
-
-## Monitoring URLs
-
-| Service     | URL                     | Notes                    |
-|------------|-------------------------|--------------------------|
-| Frontend   | http://localhost:5010   | Main application        |
-| API Gateway| http://localhost:5011   | API documentation       |
-| Orders     | http://localhost:5012   | Order service          |
-| Inventory  | http://localhost:5013   | Inventory service      |
-| Grafana    | http://localhost:3001   | admin/InsightOps2024!  |
-| Prometheus | http://localhost:9091   | Metrics storage        |
-| Loki       | http://localhost:3101   | Log aggregation        |
 
 ## Contributing
 
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/name`)
-3. Commit changes (`git commit -am 'Add feature'`)
-4. Push branch (`git push origin feature/name`)
+1. Fork repository
+2. Create feature branch
+```powershell
+git checkout -b feature/name
+```
+3. Commit changes
+```powershell
+git commit -am "Add feature"
+```
+4. Push branch
+```powershell
+git push origin feature/name
+```
 5. Create Pull Request
 
----
+## License
 
-For more detailed information about specific components or configurations, please refer to the relevant documentation in the `docs` directory.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
