@@ -1,146 +1,226 @@
-version: '3.8'
 services:
   postgres:
     image: postgres:13
-    container_name: postgres
+    container_name: insightops_db
     environment:
-      POSTGRES_USER: demo_user
-      POSTGRES_PASSWORD: demo_password
-      POSTGRES_DB: demo_db
+      POSTGRES_USER: insightops_user
+      POSTGRES_PASSWORD: insightops_pwd
+      POSTGRES_DB: insightops_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5433:5432"  # Changed to avoid conflict
     networks:
-      - demo-network
+      - insightops_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U demo_user -d demo_db"]
+      test: ["CMD-SHELL", "pg_isready -U insightops_user -d insightops_db"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
       
   frontend:
     build: 
-      context: ./FrontendService
+      context: ../FrontendService
       dockerfile: Dockerfile
-    container_name: frontend
+    container_name: insightops_frontend
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ApiGateway__Url=http://api_gateway
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ApiGateway__Url=http://insightops_gateway
+      - ASPNETCORE_URLS=http://+:80
+      - ConnectionStrings__Postgres=Host=insightops_db;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd;Maximum Pool Size=100;Connection Idle Lifetime=60
     ports:
-      - "5000:80"
+      - "5010:80"
     depends_on:
       - api_gateway
     networks:
-      - demo-network
+      - insightops_network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   api_gateway:
     build: 
-      context: ./ApiGateway
+      context: ../ApiGateway
       dockerfile: Dockerfile
-    container_name: api_gateway
+    container_name: insightops_gateway
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - Services__OrderService=http://order_service
-      - Services__InventoryService=http://inventory_service
+      - ASPNETCORE_ENVIRONMENT=Production
+      - Services__OrderService=http://insightops_orders
+      - Services__InventoryService=http://insightops_inventory
+      - ASPNETCORE_URLS=http://+:80
     ports:
-      - "5001:80"
+      - "5011:80"
     depends_on:
       - order_service
       - inventory_service
     networks:
-      - demo-network
+      - insightops_network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   order_service:
     build: 
-      context: ./OrderService
+      context: ../OrderService
       dockerfile: Dockerfile
-    container_name: order_service
-    ports:
-      - "5002:80"
+    container_name: insightops_orders
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__Postgres=Host=postgres;Database=demo_db;Username=demo_user;Password=demo_password
-      - OpenTelemetry__Tempo=http://tempo:4317
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__Postgres=Host=insightops_db;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd;Maximum Pool Size=100;Connection Idle Lifetime=60
+      - OpenTelemetry__OtlpEndpoint=http://insightops_tempo:4317
+      - ASPNETCORE_URLS=http://+:80
+    ports:
+      - "5012:80"
     depends_on:
       postgres:
         condition: service_healthy
     networks:
-      - demo-network
+      - insightops_network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   inventory_service:
     build: 
-      context: ./InventoryService
+      context: ../InventoryService
       dockerfile: Dockerfile
-    container_name: inventory_service
-    ports:
-      - "5003:80"
+    container_name: insightops_inventory
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__Postgres=Host=postgres;Database=demo_db;Username=demo_user;Password=demo_password
-      - OpenTelemetry__Tempo=http://tempo:4317
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__Postgres=Host=insightops_db;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd;Maximum Pool Size=100;Connection Idle Lifetime=60
+      - OpenTelemetry__OtlpEndpoint=http://insightops_tempo:4317
+      - ASPNETCORE_URLS=http://+:80
+    ports:
+      - "5013:80"
     depends_on:
       postgres:
         condition: service_healthy
     networks:
-      - demo-network
+      - insightops_network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   prometheus:
-    image: prom/prometheus
-    container_name: prometheus
+    image: prom/prometheus:latest
+    container_name: insightops_prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
     ports:
-      - "9090:9090"
+      - "9091:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
     networks:
-      - demo-network
+      - insightops_network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   grafana:
     image: grafana/grafana:latest
-    container_name: grafana
+    container_name: insightops_grafana
     environment:
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
-      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=InsightOps2024!
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource,grafana-piechart-panel
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_ANALYTICS_REPORTING_ENABLED=false
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - grafana_data:/var/lib/grafana
     ports:
-      - "3000:3000"
+      - "3001:3000"
     depends_on:
       - prometheus
       - loki
       - tempo
     networks:
-      - demo-network
+      - insightops_network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   loki:
     image: grafana/loki:2.4.1
-    container_name: loki
-    ports:
-      - "3100:3100"
+    container_name: insightops_loki
     command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3101:3100"
     volumes:
       - ./loki-config.yaml:/etc/loki/local-config.yaml
+      - loki_data:/loki
     networks:
-      - demo-network
+      - insightops_network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   tempo:
     image: grafana/tempo:1.2.1
-    container_name: tempo
+    container_name: insightops_tempo
     command: [ "-config.file=/etc/tempo.yaml" ]
     volumes:
       - ./tempo.yaml:/etc/tempo.yaml
+      - tempo_data:/tmp/tempo
     ports:
-      - "4317:4317"  # OTLP gRPC
-      - "4318:4318"  # OTLP HTTP
+      - "4319:4317"
+      - "4320:4318"
     networks:
-      - demo-network
+      - insightops_network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data:
+    name: insightops_postgres_data
   grafana_data:
+    name: insightops_grafana_data
+  prometheus_data:
+    name: insightops_prometheus_data
+  loki_data:
+    name: insightops_loki_data
+  tempo_data:
+    name: insightops_tempo_data
 
 networks:
-  demo-network:
+  insightops_network:
+    name: insightops_network
     driver: bridge

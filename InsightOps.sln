@@ -12,6 +12,30 @@ EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "InventoryService", "InventoryService\InventoryService.csproj", "{92F7D7FC-01B6-455F-9DB0-02279090D747}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Configurations", "Configurations", "{5A0B0BB1-D4B0-4AAD-8839-D50B1FA46DE8}"
+	ProjectSection(SolutionItems) = preProject
+		Configurations\docker-compose.yml = Configurations\docker-compose.yml
+		Configurations\loki-config.yaml = Configurations\loki-config.yaml
+		Configurations\prometheus.yml = Configurations\prometheus.yml
+		Configurations\tempo.yaml = Configurations\tempo.yaml
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Documentations", "Documentations", "{19EB9068-3CD2-45C1-8B48-AB68557416DD}"
+	ProjectSection(SolutionItems) = preProject
+		.gitignore = .gitignore
+		LICENSE = LICENSE
+		README.md = README.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Scripts", "Scripts", "{40B47F99-0656-4A24-B78B-5D5C3955B27C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "grafana", "grafana", "{0BA45768-AFEB-40F6-9503-85B0B264C486}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "provisioning", "provisioning", "{2E8106D9-CCB6-4D36-B5AB-900F531F5722}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "datasources", "datasources", "{A601C610-E24C-4833-88D0-47F8A3FF4018}"
+	ProjectSection(SolutionItems) = preProject
+		Configurations\grafana\provisioning\datasources\datasources.yml = Configurations\grafana\provisioning\datasources\datasources.yml
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -38,6 +62,11 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{0BA45768-AFEB-40F6-9503-85B0B264C486} = {5A0B0BB1-D4B0-4AAD-8839-D50B1FA46DE8}
+		{2E8106D9-CCB6-4D36-B5AB-900F531F5722} = {0BA45768-AFEB-40F6-9503-85B0B264C486}
+		{A601C610-E24C-4833-88D0-47F8A3FF4018} = {2E8106D9-CCB6-4D36-B5AB-900F531F5722}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {A31DFDC4-E723-41B8-91D9-AC4CB20C3DC1}

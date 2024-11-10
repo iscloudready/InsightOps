@@ -4,18 +4,18 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    url: http://insightops_prometheus:9090
     isDefault: true
 
   - name: Loki
     type: loki
     access: proxy
-    url: http://loki:3100
+    url: http://insightops_loki:3100
 
   - name: Tempo
     type: tempo
     access: proxy
-    url: http://tempo:4317
+    url: http://insightops_tempo:4317
     jsonData:
       httpMethod: GET
       serviceMap:

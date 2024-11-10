@@ -24,6 +24,170 @@ InsightOps provides real-time metrics, tracing, and logging in an ASP.NET Core-b
 
 ![Architecture Diagram](./docs/architecture.png) <!-- Replace with actual architecture diagram path if available -->
 
+### Quick Start
+```powershell
+# Clone and initialize
+git clone https://github.com/yourusername/InsightOps.git
+cd InsightOps
+.\scripts\init-insightOps.ps1
+# For development setup with detailed output
+.\scripts\init-insightOps.ps1 -Development
+# Force configuration recreation
+.\scripts\init-insightOps.ps1 -ForceRecreate
+```
+
+### Prerequisites Check
+```powershell
+# Check all prerequisites
+.\scripts\utils\check-prereqs.ps1
+# Detailed check with versions
+.\scripts\utils\check-prereqs.ps1 -Detailed
+```
+
+### Environment Management
+```powershell
+# Setup development environment
+.\scripts\utils\setup-environment.ps1 -Environment Development
+# Setup staging environment
+.\scripts\utils\setup-environment.ps1 -Environment Staging
+# Setup production environment
+.\scripts\utils\setup-environment.ps1 -Environment Production
+```
+### Management Commands
+```powershell
+# Start all services
+.\scripts\docker-commands.ps1
+# Select option 1
+# View service health
+.\scripts\docker-commands.ps1
+# Select option 15
+# View logs with follow
+.\scripts\docker-commands.ps1
+# Select option 17
+# Check service status
+.\scripts\docker-commands.ps1
+# Select option 3
+```
+### Cleanup Operations
+```powershell
+# Basic cleanup (keeps data and configs)
+.\scripts\utils\cleanup.ps1
+# Full cleanup including data
+.\scripts\utils\cleanup.ps1 -RemoveData
+# Complete cleanup including configurations
+.\scripts\utils\cleanup.ps1 -RemoveData -RemoveConfigs -Force
+```
+### Environment-Specific URLs
+|
+ Service 
+|
+ Development 
+|
+ Staging 
+|
+ Production 
+|
+|
+---------
+|
+------------
+|
+----------
+|
+------------
+|
+|
+ Frontend 
+|
+ http://localhost:5010 
+|
+ https://staging-frontend:5010 
+|
+ https://frontend:443 
+|
+|
+ API Gateway 
+|
+ http://localhost:5011 
+|
+ https://staging-gateway:5011 
+|
+ https://gateway:443 
+|
+|
+ Order Service 
+|
+ http://localhost:5012 
+|
+ https://staging-orders:5012 
+|
+ https://orders:443 
+|
+|
+ Inventory Service 
+|
+ http://localhost:5013 
+|
+ https://staging-inventory:5013 
+|
+ https://inventory:443 
+|
+|
+ Grafana 
+|
+ http://localhost:3001 
+|
+ https://staging-grafana:3001 
+|
+ https://grafana:443 
+|
+|
+ Prometheus 
+|
+ http://localhost:9091 
+|
+ https://staging-prometheus:9091 
+|
+ https://prometheus:443 
+|
+
+### Access Credentials
+|
+ Environment 
+|
+ Username 
+|
+ Password 
+|
+|
+------------
+|
+----------
+|
+-----------
+|
+|
+ Development 
+|
+ admin 
+|
+ InsightOps2024! 
+|
+|
+ Staging 
+|
+ admin 
+|
+ StageOps2024! 
+|
+|
+ Production 
+|
+ admin 
+|
+ [Contact Admin] 
+|
+
 ## Setup and Prerequisites
 
 Ensure you have the following tools installed:

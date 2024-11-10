@@ -1,0 +1,167 @@
+﻿@model DockerManagementViewModel
+
+<div class="container-fluid px-4">
+    <h1 class="mt-4">Docker Management</h1>
+
+    @if (!string.IsNullOrEmpty(Model.Error))
+    {
+        <div class="alert alert-danger">@Model.Error</div>
+    }
+
+    <!-- Containers Section -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <i class="fas fa-cube me-1"></i>
+            Containers
+        </div>
+        <div class="card-body">
+            <table class="table table-striped table-hover" id="containersTable">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Image</th>
+                        <th>Status</th>
+                        <th>Ports</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var container in Model.Containers)
+                    {
+                        <tr>
+                            <td>@container.Names</td>
+                            <td>@container.Image</td>
+                            <td>
+                                <span class="badge @(container.Status.Contains("Up") ? "bg-success" : "bg-danger")">
+                                    @container.Status
+                                </span>
+                            </td>
+                            <td>@container.Ports</td>
+                            <td>
+                                <div class="btn-group">
+                                    <button class="btn btn-sm btn-outline-primary" onclick="viewLogs('@container.ID')">
+                                        <i class="fas fa-file-alt"></i> Logs
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-warning" onclick="restartContainer('@container.ID')">
+                                        <i class="fas fa-sync"></i> Restart
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="stopContainer('@container.ID')">
+                                        <i class="fas fa-stop"></i> Stop
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Images Section -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <i class="fas fa-images me-1"></i>
+            Images
+        </div>
+        <div class="card-body">
+            <table class="table table-striped" id="imagesTable">
+                <thead>
+                    <tr>
+                        <th>Repository</th>
+                        <th>Tag</th>
+                        <th>ID</th>
+                        <th>Created</th>
+                        <th>Size</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var image in Model.Images)
+                    {
+                        <tr>
+                            <td>@image.Repository</td>
+                            <td>@image.Tag</td>
+                            <td>@image.ID</td>
+                            <td>@image.Created</td>
+                            <td>@image.Size</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Logs Modal -->
+<div class="modal fade" id="logsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Container Logs</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="logsContent" style="max-height: 500px; overflow-y: auto;"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        // Initialize DataTables
+        $(document).ready(function() {
+            $('#containersTable').DataTable();
+            $('#imagesTable').DataTable();
+        });
+
+        // Container Actions
+        async function containerAction(containerId, action) {
+            try {
+                const response = await fetch('/DockerManagement/ContainerAction', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ containerId, action })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    location.reload();
+                } else {
+                    alert('Action failed: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error);
+            }
+        }
+
+        function restartContainer(id) {
+            if (confirm('Are you sure you want to restart this container?')) {
+                containerAction(id, 'restart');
+            }
+        }
+
+        function stopContainer(id) {
+            if (confirm('Are you sure you want to stop this container?')) {
+                containerAction(id, 'stop');
+            }
+        }
+
+        async function viewLogs(containerId) {
+            try {
+                const response = await fetch(`/DockerManagement/Logs?containerId=${containerId}`);
+                const result = await response.json();
+
+                if (result.success) {
+                    document.getElementById('logsContent').textContent = result.logs;
+                    new bootstrap.Modal(document.getElementById('logsModal')).show();
+                } else {
+                    alert('Failed to fetch logs: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error);
+            }
+        }
+    </script>
+}
