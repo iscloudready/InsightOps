@@ -1,226 +1,298 @@
+# Common configurations using YAML anchors
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-healthcheck: &default-healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
+x-common-variables: &common-vars
+  ASPNETCORE_ENVIRONMENT: ${ENVIRONMENT:-Production}
+  NAMESPACE: ${NAMESPACE:-insightops}
+
+x-service-defaults: &service-defaults
+  networks:
+    - ${NAMESPACE:-insightops}_network
+  restart: unless-stopped
+  logging: *default-logging
+
+x-resource-limits: &default-resource-limits
+  deploy:
+    resources:
+      limits:
+        cpus: '0.50'
+        memory: 512M
+      reservations:
+        cpus: '0.25'
+        memory: 256M
+
 services:
   postgres:
     image: postgres:13
-    container_name: insightops_db
+    container_name: ${NAMESPACE:-insightops}_db
+    <<: [*service-defaults, *default-resource-limits]
     environment:
-      POSTGRES_USER: insightops_user
-      POSTGRES_PASSWORD: insightops_pwd
-      POSTGRES_DB: insightops_db
+      POSTGRES_USER: ${DB_USER:-insightops_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-insightops_pwd}
+      POSTGRES_DB: ${DB_NAME:-insightops_db}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
     ports:
-      - "5433:5432"  # Changed to avoid conflict
-    networks:
-      - insightops_network
+      - "${DB_PORT:-5433}:5432"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U insightops_user -d insightops_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-      
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-insightops_user} -d ${DB_NAME:-insightops_db}"]
+    
   frontend:
     build: 
-      context: ../FrontendService
-      dockerfile: Dockerfile
-    container_name: insightops_frontend
+      context: ${BUILD_CONTEXT:-..}/FrontendService
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+      args:
+        ASPNETCORE_ENVIRONMENT: ${ENVIRONMENT:-Production}
+    container_name: ${NAMESPACE:-insightops}_frontend
+    <<: [*service-defaults, *default-resource-limits]
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ApiGateway__Url=http://insightops_gateway
-      - ASPNETCORE_URLS=http://+:80
-      - ConnectionStrings__Postgres=Host=insightops_db;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd;Maximum Pool Size=100;Connection Idle Lifetime=60
+      <<: *common-vars
+      ApiGateway__Url: http://${NAMESPACE:-insightops}_gateway
+      ASPNETCORE_URLS: http://+:80
+      ConnectionStrings__Postgres: Host=${NAMESPACE:-insightops}_db;Port=5432;Database=${DB_NAME:-insightops_db};Username=${DB_USER:-insightops_user};Password=${DB_PASSWORD:-insightops_pwd};Maximum Pool Size=100;Connection Idle Lifetime=60;Pooling=true;MinPoolSize=10
     ports:
-      - "5010:80"
+      - "${FRONTEND_PORT:-5010}:80"
     depends_on:
-      - api_gateway
-    networks:
-      - insightops_network
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      api_gateway:
+        condition: service_healthy
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
 
   api_gateway:
     build: 
-      context: ../ApiGateway
-      dockerfile: Dockerfile
-    container_name: insightops_gateway
+      context: ${BUILD_CONTEXT:-..}/ApiGateway
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    container_name: ${NAMESPACE:-insightops}_gateway
+    <<: [*service-defaults, *default-resource-limits]
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - Services__OrderService=http://insightops_orders
-      - Services__InventoryService=http://insightops_inventory
-      - ASPNETCORE_URLS=http://+:80
+      <<: *common-vars
+      Services__OrderService: http://${NAMESPACE:-insightops}_orders
+      Services__InventoryService: http://${NAMESPACE:-insightops}_inventory
+      ASPNETCORE_URLS: http://+:80
+      OpenTelemetry__Enabled: "true"
+      OpenTelemetry__ServiceName: "api-gateway"
     ports:
-      - "5011:80"
+      - "${GATEWAY_PORT:-5011}:80"
     depends_on:
-      - order_service
-      - inventory_service
-    networks:
-      - insightops_network
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      order_service:
+        condition: service_healthy
+      inventory_service:
+        condition: service_healthy
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
 
   order_service:
     build: 
-      context: ../OrderService
-      dockerfile: Dockerfile
-    container_name: insightops_orders
+      context: ${BUILD_CONTEXT:-..}/OrderService
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    container_name: ${NAMESPACE:-insightops}_orders
+    <<: [*service-defaults, *default-resource-limits]
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__Postgres=Host=insightops_db;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd;Maximum Pool Size=100;Connection Idle Lifetime=60
-      - OpenTelemetry__OtlpEndpoint=http://insightops_tempo:4317
-      - ASPNETCORE_URLS=http://+:80
+      <<: *common-vars
+      ConnectionStrings__Postgres: Host=${NAMESPACE:-insightops}_db;Port=5432;Database=${DB_NAME:-insightops_db};Username=${DB_USER:-insightops_user};Password=${DB_PASSWORD:-insightops_pwd};Maximum Pool Size=100;Connection Idle Lifetime=60;Pooling=true;MinPoolSize=10
+      OpenTelemetry__Enabled: "true"
+      OpenTelemetry__ServiceName: "order-service"
+      OpenTelemetry__OtlpEndpoint: http://${NAMESPACE:-insightops}_tempo:4317
+      ASPNETCORE_URLS: http://+:80
     ports:
-      - "5012:80"
+      - "${ORDER_PORT:-5012}:80"
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - insightops_network
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
 
   inventory_service:
     build: 
-      context: ../InventoryService
-      dockerfile: Dockerfile
-    container_name: insightops_inventory
+      context: ${BUILD_CONTEXT:-..}/InventoryService
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    container_name: ${NAMESPACE:-insightops}_inventory
+    <<: [*service-defaults, *default-resource-limits]
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__Postgres=Host=insightops_db;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd;Maximum Pool Size=100;Connection Idle Lifetime=60
-      - OpenTelemetry__OtlpEndpoint=http://insightops_tempo:4317
-      - ASPNETCORE_URLS=http://+:80
+      <<: *common-vars
+      ConnectionStrings__Postgres: Host=${NAMESPACE:-insightops}_db;Port=5432;Database=${DB_NAME:-insightops_db};Username=${DB_USER:-insightops_user};Password=${DB_PASSWORD:-insightops_pwd};Maximum Pool Size=100;Connection Idle Lifetime=60;Pooling=true;MinPoolSize=10
+      OpenTelemetry__Enabled: "true"
+      OpenTelemetry__ServiceName: "inventory-service"
+      OpenTelemetry__OtlpEndpoint: http://${NAMESPACE:-insightops}_tempo:4317
+      ASPNETCORE_URLS: http://+:80
     ports:
-      - "5013:80"
+      - "${INVENTORY_PORT:-5013}:80"
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - insightops_network
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
 
   prometheus:
     image: prom/prometheus:latest
-    container_name: insightops_prometheus
+    container_name: ${NAMESPACE:-insightops}_prometheus
+    <<: [*service-defaults]
+    user: nobody
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/rules:/etc/prometheus/rules
       - prometheus_data:/prometheus
     ports:
-      - "9091:9090"
+      - "${PROMETHEUS_PORT:-9091}:9090"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.time=${METRICS_RETENTION:-30d}'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
-    networks:
-      - insightops_network
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - '--web.enable-lifecycle'
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      <<: *default-healthcheck
 
   grafana:
     image: grafana/grafana:latest
-    container_name: insightops_grafana
+    container_name: ${NAMESPACE:-insightops}_grafana
+    <<: [*service-defaults]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=InsightOps2024!
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-InsightOps2024!}
       - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
       - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource,grafana-piechart-panel
       - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_SECURITY_ALLOW_EMBEDDING=true
       - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_UNIFIED_ALERTING_ENABLED=true
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/overview.json
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/etc/grafana/dashboards
       - grafana_data:/var/lib/grafana
     ports:
-      - "3001:3000"
+      - "${GRAFANA_PORT:-3001}:3000"
     depends_on:
-      - prometheus
-      - loki
-      - tempo
-    networks:
-      - insightops_network
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      <<: *default-healthcheck
 
   loki:
     image: grafana/loki:2.4.1
-    container_name: insightops_loki
+    container_name: ${NAMESPACE:-insightops}_loki
+    <<: [*service-defaults]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     command: -config.file=/etc/loki/local-config.yaml
     ports:
-      - "3101:3100"
+      - "${LOKI_PORT:-3101}:3100"
     volumes:
       - ./loki-config.yaml:/etc/loki/local-config.yaml
       - loki_data:/loki
-    networks:
-      - insightops_network
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - ./loki/rules:/etc/loki/rules
+    environment:
+      - JAEGER_AGENT_HOST=tempo
+      - JAEGER_ENDPOINT=http://tempo:14268/api/traces
+      - JAEGER_SAMPLER_TYPE=const
+      - JAEGER_SAMPLER_PARAM=1
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      <<: *default-healthcheck
 
   tempo:
     image: grafana/tempo:1.2.1
-    container_name: insightops_tempo
+    container_name: ${NAMESPACE:-insightops}_tempo
+    <<: [*service-defaults]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     command: [ "-config.file=/etc/tempo.yaml" ]
     volumes:
       - ./tempo.yaml:/etc/tempo.yaml
       - tempo_data:/tmp/tempo
     ports:
-      - "4319:4317"
-      - "4320:4318"
-    networks:
-      - insightops_network
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - "${TEMPO_PORT:-4319}:4317"
+      - "${TEMPO_PORT_HTTP:-4320}:4318"
+    environment:
+      - TEMPO_BACKEND=local
+      - TEMPO_RETENTION=${TEMPO_RETENTION:-24h}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3200/ready"]
+      <<: *default-healthcheck
 
 volumes:
   postgres_data:
-    name: insightops_postgres_data
+    name: ${NAMESPACE:-insightops}_postgres_data
+    driver: local
   grafana_data:
-    name: insightops_grafana_data
+    name: ${NAMESPACE:-insightops}_grafana_data
+    driver: local
   prometheus_data:
-    name: insightops_prometheus_data
+    name: ${NAMESPACE:-insightops}_prometheus_data
+    driver: local
   loki_data:
-    name: insightops_loki_data
+    name: ${NAMESPACE:-insightops}_loki_data
+    driver: local
   tempo_data:
-    name: insightops_tempo_data
+    name: ${NAMESPACE:-insightops}_tempo_data
+    driver: local
 
 networks:
   insightops_network:
-    name: insightops_network
+    name: ${NAMESPACE:-insightops}_network
     driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16

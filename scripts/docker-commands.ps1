@@ -1,277 +1,155 @@
+# Check if running in PowerShell 7, and if not, relaunch with PowerShell 7
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    $ps7Path = "C:\Program Files\PowerShell\7\pwsh.exe"
+    if (Test-Path $ps7Path) {
+        Write-Output "Switching to PowerShell 7 to execute the script..."
+        & "$ps7Path" -File $MyInvocation.MyCommand.Path @args
+        exit
+    } else {
+        Write-Output "PowerShell 7 is not installed. Please install PowerShell 7 to continue."
+        exit 1
+    }
+}
+
+#Requires -Version 7.0
+#Requires -RunAsAdministrator
+
 # InsightOps Docker Management Script
 using namespace System.Management.Automation
 using namespace System.Collections.Generic
+using namespace System.Diagnostics
+
+param (
+    [Parameter()]
+    [string]$Environment = "Development",
+    [switch]$Force,
+    [switch]$Verbose
+)
+
+# Import dependent modules
+$scriptPath = $PSScriptRoot
+$modulesPath = Join-Path $scriptPath "modules"
+
+# Import all module files
+@(
+    "Core.ps1",
+    "Configuration.ps1",
+    "Environment.ps1",
+    "Services.ps1",
+    "Monitoring.ps1",
+    "Logging.ps1",
+    "Security.ps1",
+    "Network.ps1",
+    "Backup.ps1",
+    "Health.ps1",
+    "Utils.ps1"
+) | ForEach-Object {
+    $modulePath = Join-Path $modulesPath $_
+    if (Test-Path $modulePath) {
+        . $modulePath
+    }
+    else {
+        throw "Required module not found: $_"
+    }
+}
 
 # Script Configuration
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$VerbosePreference = $Verbose ? "Continue" : "SilentlyContinue"
 
-# Script Paths
-$scriptPath = $PSScriptRoot
-$CONFIG_PATH = Join-Path $scriptPath "..\Configurations"
-$GRAFANA_PATH = Join-Path $CONFIG_PATH "grafana"
-$DOCKER_COMPOSE_FILE = Join-Path $CONFIG_PATH "docker-compose.yml"
+# Initialize Logging
+Initialize-Logging
 
-# Color Configuration
-$COLORS = @{
-    Success = [System.ConsoleColor]::Green
-    Error = [System.ConsoleColor]::Red
-    Warning = [System.ConsoleColor]::Yellow
-    Info = [System.ConsoleColor]::Cyan
-    Header = [System.ConsoleColor]::Magenta
-}
-
-# Service Configuration
-$SERVICES = @{
-    Frontend = @{
-        Url = "http://localhost:5010"
-        HealthEndpoint = "/health"
-        Container = "insightops_frontend"
-    }
-    ApiGateway = @{
-        Url = "http://localhost:5011"
-        HealthEndpoint = "/health"
-        Container = "insightops_gateway"
-    }
-    OrderService = @{
-        Url = "http://localhost:5012"
-        HealthEndpoint = "/health"
-        Container = "insightops_orders"
-    }
-    InventoryService = @{
-        Url = "http://localhost:5013"
-        HealthEndpoint = "/health"
-        Container = "insightops_inventory"
-    }
-    Grafana = @{
-        Url = "http://localhost:3001"
-        HealthEndpoint = "/api/health"
-        Container = "insightops_grafana"
-        Credentials = @{
-            Username = "admin"
-            Password = "InsightOps2024!"
-        }
-    }
-    Prometheus = @{
-        Url = "http://localhost:9091"
-        Container = "insightops_prometheus"
-    }
-    Loki = @{
-        Url = "http://localhost:3101"
-        Container = "insightops_loki"
-    }
-}
-
-# Function Definitions
-function Print-Header($title) {
-    Write-Host "`n=== $title ===" -ForegroundColor $COLORS.Header
-}
-
-function Test-Environment {
-    $required = @(
-        $DOCKER_COMPOSE_FILE,
-        (Join-Path $GRAFANA_PATH "provisioning\datasources\datasources.yml"),
-        (Join-Path $CONFIG_PATH "prometheus.yml")
-    )
+# Script Start
+try {
+    Write-Log "Starting InsightOps Docker Management Script"
+    Write-Log "Environment: $Environment"
     
-    $missing = $required | Where-Object { -not (Test-Path $_) }
-    if ($missing) {
-        Write-Host "Missing required files:`n$($missing -join "`n")" -ForegroundColor $COLORS.Error
-        return $false
+    # Validate Environment
+    if (-not (Test-Environment)) {
+        throw "Environment validation failed"
     }
-    return $true
-}
 
-function Start-Services {
-    Print-Header "Starting Services"
-    try {
-        Push-Location $CONFIG_PATH
-        docker-compose up -d --build
-        Write-Host "Services started successfully" -ForegroundColor $COLORS.Success
-    }
-    catch {
-        Write-Host "Error starting services: $_" -ForegroundColor $COLORS.Error
-    }
-    finally {
-        Pop-Location
-    }
-}
+    # Initialize Configuration
+    Initialize-Configuration
 
-function Stop-Services {
-    Print-Header "Stopping Services"
-    try {
-        Push-Location $CONFIG_PATH
-        docker-compose down
-        Write-Host "Services stopped successfully" -ForegroundColor $COLORS.Success
+    # Verify Prerequisites
+    if (-not (Test-Prerequisites)) {
+        throw "Prerequisites check failed"
     }
-    catch {
-        Write-Host "Error stopping services: $_" -ForegroundColor $COLORS.Error
-    }
-    finally {
-        Pop-Location
-    }
-}
 
-function Show-ContainerStatus {
-    Print-Header "Container Status"
-    try {
-        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-    }
-    catch {
-        Write-Host "Error showing container status: $_" -ForegroundColor $COLORS.Error
-    }
-}
-
-function Show-Logs($containerName) {
-    if ([string]::IsNullOrEmpty($containerName)) {
-        Print-Header "Showing logs for all containers"
-        Push-Location $CONFIG_PATH
-        docker-compose logs
-        Pop-Location
-    }
-    else {
-        Print-Header "Showing logs for $containerName"
-        docker logs $containerName -f --tail 100
-    }
-}
-
-function Show-Stats {
-    Print-Header "Container Stats"
-    try {
-        docker stats --no-stream
-    }
-    catch {
-        Write-Host "Error showing stats: $_" -ForegroundColor $COLORS.Error
-    }
-}
-
-function Show-ResourceUsage {
-    Print-Header "Resource Usage"
-    docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}"
-}
-
-function Open-ServiceUrls {
-    Print-Header "Opening Service URLs"
-    foreach ($service in $SERVICES.GetEnumerator()) {
-        Write-Host "Opening $($service.Key) at $($service.Value.Url)" -ForegroundColor $COLORS.Info
-        Start-Process $service.Value.Url
-        Start-Sleep -Seconds 1
-    }
-}
-
-function Check-ServiceHealth {
-    Print-Header "Service Health Check"
-    foreach ($service in $SERVICES.GetEnumerator()) {
-        if ($service.Value.HealthEndpoint) {
-            try {
-                $response = Invoke-WebRequest -Uri "$($service.Value.Url)$($service.Value.HealthEndpoint)" -TimeoutSec 5
-                $status = if ($response.StatusCode -eq 200) { "Healthy" } else { "Unhealthy" }
-                $color = if ($response.StatusCode -eq 200) { $COLORS.Success } else { $COLORS.Error }
-                Write-Host "$($service.Key): $status" -ForegroundColor $color
+    # Main Menu Loop
+    while ($true) {
+        Clear-Host
+        Show-Header
+        Show-Menu
+        
+        try {
+            $choice = Read-Host "`nEnter your choice (0-20)"
+            
+            switch ($choice) {
+                # Environment Management
+                0 { exit }
+                1 { Initialize-InsightOpsEnvironment -Force:$Force }
+                2 { Reset-InsightOpsEnvironment -Backup:$true }
+                3 { Switch-Environment }
+                
+                # Service Management
+                4 { Start-Services }
+                5 { Stop-Services }
+                6 { Show-ContainerStatus }
+                7 { 
+                    $serviceName = Get-ServiceSelection
+                    Show-Logs $serviceName
+                }
+                8 { Show-ResourceUsage }
+                9 { 
+                    $serviceName = Get-ServiceSelection
+                    Rebuild-Service $serviceName
+                }
+                10 { Clean-DockerSystem }
+                
+                # Monitoring & Access
+                11 { Open-ServiceUrls }
+                12 { Check-ServiceHealth }
+                13 { Show-DetailedMetrics }
+                14 { Export-ContainerLogs }
+                
+                # Security & Maintenance
+                15 { Backup-Configuration }
+                16 { Restore-Configuration }
+                17 { Test-SecurityCompliance }
+                18 { Show-NetworkStatus }
+                
+                # Advanced Options
+                19 { Show-AdvancedOptions }
+                20 { Show-Documentation }
+                
+                default { 
+                    Write-Warning "Invalid option selected"
+                }
             }
-            catch {
-                Write-Host "$($service.Key): Unreachable" -ForegroundColor $COLORS.Error
+            
+            if ($choice -ne 0) {
+                Write-Host "`nOperation completed. Press Enter to continue..."
+                Read-Host
             }
         }
-    }
-}
-
-function Export-ContainerLogs {
-    Print-Header "Export Container Logs"
-    $logDir = Join-Path $scriptPath "logs"
-    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-    
-    foreach ($service in $SERVICES.GetEnumerator()) {
-        $container = $service.Value.Container
-        if ($container) {
-            $logFile = Join-Path $logDir "$($service.Key).log"
-            docker logs $container > $logFile 2>&1
-            Write-Host "Exported logs for $($service.Key) to $logFile" -ForegroundColor $COLORS.Success
+        catch {
+            Write-Error "An error occurred: $_"
+            Write-Log "Error in main menu: $_" -Level Error
+            Write-Host "Press Enter to continue..."
+            Read-Host
         }
     }
 }
-
-function Backup-Configuration {
-    Print-Header "Backup Configuration"
-    $backupDir = Join-Path $scriptPath "backups"
-    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $backupPath = Join-Path $backupDir "config_backup_$timestamp"
-    
-    New-Item -ItemType Directory -Force -Path $backupPath | Out-Null
-    Copy-Item $CONFIG_PATH\* $backupPath -Recurse -Force
-    Write-Host "Configuration backed up to: $backupPath" -ForegroundColor $COLORS.Success
-}
-
-# Main Menu
-function Show-Menu {
-    Write-Host "`nInsightOps Docker Management" -ForegroundColor $COLORS.Success
-    Write-Host "=== Services Management ===" -ForegroundColor $COLORS.Info
-    Write-Host "1.  Start all services"
-    Write-Host "2.  Stop all services"
-    Write-Host "3.  Show container status"
-    Write-Host "4.  Show container logs"
-    Write-Host "5.  Show container stats"
-    Write-Host "6.  Rebuild specific service"
-    Write-Host "7.  Clean Docker system"
-    Write-Host "8.  Show quick reference"
-    Write-Host "=== Monitoring & Access ===" -ForegroundColor $COLORS.Info
-    Write-Host "9.  Open all service URLs"
-    Write-Host "10. Check service health"
-    Write-Host "11. Show resource usage"
-    Write-Host "=== Environment Management ===" -ForegroundColor $COLORS.Info
-    Write-Host "12. Manage environments"
-    Write-Host "13. Check prerequisites"
-    Write-Host "14. Run cleanup tasks"
-    Write-Host "=== Advanced Options ===" -ForegroundColor $COLORS.Info
-    Write-Host "15. View system metrics"
-    Write-Host "16. Export container logs"
-    Write-Host "17. Backup configuration"
-    Write-Host "0.  Exit"
-}
-
-# Main Execution
-if (-not (Test-Environment)) {
+catch {
+    Write-Error "Fatal error occurred: $_"
+    Write-Log "Fatal error: $_" -Level Error
     exit 1
 }
-
-while ($true) {
-    Show-Menu
-    $choice = Read-Host "`nEnter your choice (0-17)"
-    
-    switch ($choice) {
-        0 { exit }
-        1 { Start-Services }
-        2 { Stop-Services }
-        3 { Show-ContainerStatus }
-        4 { 
-            Write-Host "Available services:" -ForegroundColor $COLORS.Info
-            $SERVICES.Keys | ForEach-Object { Write-Host "- $_" }
-            $containerName = Read-Host "Enter service name (press Enter for all)"
-            Show-Logs $SERVICES[$containerName].Container 
-        }
-        5 { Show-Stats }
-        6 {
-            Write-Host "Available services:" -ForegroundColor $COLORS.Info
-            $SERVICES.Keys | ForEach-Object { Write-Host "- $_" }
-            $serviceName = Read-Host "Enter service name to rebuild"
-            Rebuild-Service $serviceName
-        }
-        7 { Clean-DockerSystem }
-        8 { Show-QuickReference }
-        9 { Open-ServiceUrls }
-        10 { Check-ServiceHealth }
-        11 { Show-ResourceUsage }
-        12 { Manage-Environment }
-        13 { & "$PSScriptRoot\utils\check-prereqs.ps1" -Detailed }
-        14 { & "$PSScriptRoot\utils\cleanup.ps1" }
-        15 { docker stats }
-        16 { Export-ContainerLogs }
-        17 { Backup-Configuration }
-        default { Write-Host "Invalid option" -ForegroundColor $COLORS.Error }
-    }
-    
-    if ($choice -ne 0) {
-        Write-Host "`nPress Enter to continue..."
-        Read-Host
-    }
+finally {
+    # Cleanup
+    Write-Log "Script execution completed"
 }
