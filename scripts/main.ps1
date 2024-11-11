@@ -135,40 +135,32 @@ function Initialize-Application {
             }
         }
 
-		try {
-			Write-ModuleMessage "Initializing InsightOps Management Console..." -Color Cyan
-			
-			# Check configuration
-			if (-not (Test-Configuration)) {
-				Write-ModuleMessage "Creating default configurations..." -Color Yellow
-				if (-not (Initialize-DefaultConfigurations)) {
-					throw "Failed to create default configurations"
-				}
-			}
+        try {
+            Write-ModuleMessage "Checking configuration..." -Color Cyan
+            
+            # Check and initialize configuration
+            if (-not (Test-Configuration)) {
+                Write-ModuleMessage "Creating default configurations..." -Color Yellow
+                if (-not (Initialize-DefaultConfigurations)) {
+                    throw "Failed to create default configurations"
+                }
+            }
 
-			# Initialize Docker environment
-			if (-not (Initialize-DockerEnvironment)) {
-				throw "Failed to initialize Docker environment"
-			}
+            # Initialize Docker environment
+            if (-not (Initialize-DockerEnvironment)) {
+                throw "Failed to initialize Docker environment"
+            }
 
-			Write-ModuleMessage "Initialization completed successfully" -Color Green
-		}
-		catch {
-			Write-ModuleMessage "Initialization failed: $_" -Color Red
-			exit 1
-		}
-
-        # Initialize logging
-        if (-not (Initialize-Logging)) {
-            Write-ModuleMessage "Failed to initialize logging" -Color Red
+            Write-ModuleMessage "Initialization completed successfully" -Color Green
+            return $true
+        }
+        catch {
+            Write-ModuleMessage "Initialization failed: $_" -Color Red
             return $false
         }
-
-        Write-ModuleMessage "Initialization completed successfully" -Color Green
-        return $true
     }
     catch {
-        Write-ModuleMessage "Initialization failed: $_" -Color Red
+        Write-ModuleMessage "Application initialization failed: $_" -Color Red
         return $false
     }
 }

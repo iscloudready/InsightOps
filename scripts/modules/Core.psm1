@@ -1,311 +1,246 @@
 # Core.psm1
 # Purpose: Core configuration and utility functions for InsightOps
 
-# Module dependencies are handled in main.ps1, remove direct module imports
-# to avoid circular dependencies
-
-# Define paths relative to module location
-$script:MODULE_ROOT = $PSScriptRoot
-$script:PROJECT_ROOT = Split-Path -Parent $script:MODULE_ROOT
+# Base paths - simplified to match actual structure
+$script:PROJECT_ROOT = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $script:CONFIG_PATH = Join-Path $script:PROJECT_ROOT "Configurations"
-$script:LOGS_PATH = Join-Path $script:PROJECT_ROOT "logs"
-$script:BACKUP_PATH = Join-Path $script:PROJECT_ROOT "backups"
 
-$script:CONFIG_ROOT = Join-Path (Split-Path -Parent $PSScriptRoot) "Configurations"
-$script:DOCKER_COMPOSE_FILE = Join-Path $script:CONFIG_ROOT "docker-compose.yml"
-
-# Environment and Project Settings
+# Environment Settings
 $script:NAMESPACE = "insightops"
-$script:PROJECT_NAME = "insightops"
-$script:ENVIRONMENT = if ($env:ASPNETCORE_ENVIRONMENT) { 
-    $env:ASPNETCORE_ENVIRONMENT 
-} else { 
-    "Development" 
+$script:DEFAULT_ENVIRONMENT = "Development"
+
+# Required paths - simplified to match actual structure
+$script:REQUIRED_PATHS = @(
+    $script:CONFIG_PATH,
+    (Join-Path $script:CONFIG_PATH "grafana"),
+    (Join-Path $script:CONFIG_PATH "init-scripts"),
+    (Join-Path $script:CONFIG_PATH "tempo"),
+    (Join-Path $script:CONFIG_PATH "loki"),
+    (Join-Path $script:CONFIG_PATH "prometheus")
+)
+
+# Required configuration files with proper path joining
+$script:REQUIRED_FILES = @{
+    "docker-compose.yml" = Join-Path $script:CONFIG_PATH "docker-compose.yml"
+    "tempo.yaml" = Join-Path $script:CONFIG_PATH "tempo.yaml"
+    "loki-config.yaml" = Join-Path $script:CONFIG_PATH "loki-config.yaml"
+    "prometheus.yml" = Join-Path $script:CONFIG_PATH "prometheus.yml"
+    ".env.development" = Join-Path $script:CONFIG_PATH ".env.development"
+    ".env.production" = Join-Path $script:CONFIG_PATH ".env.production"
 }
 
-# Service Configuration
+# Service Configuration with health checks
 $script:SERVICES = @{
+    Database = @{
+        Name = "postgres"
+        Container = "${script:NAMESPACE}_db"
+        Port = "5433:5432"
+        HealthCheck = "pg_isready -U insightops_user -d insightops_db"
+    }
     Frontend = @{
-        Url = "http://localhost:5010"
-        HealthEndpoint = "/health"
+        Name = "frontend"
         Container = "${script:NAMESPACE}_frontend"
-        Required = $true
-        Resources = @{
-            MinMemory = "256M"
-            MaxMemory = "512M"
-            MinCPU = "0.1"
-            MaxCPU = "0.5"
-        }
+        Port = "5010:80"
+        HealthCheck = "curl -f http://localhost:80/health"
     }
     ApiGateway = @{
-        Url = "http://localhost:5011"
-        HealthEndpoint = "/health"
+        Name = "api_gateway"
         Container = "${script:NAMESPACE}_gateway"
-        Required = $true
-        Resources = @{
-            MinMemory = "256M"
-            MaxMemory = "512M"
-            MinCPU = "0.1"
-            MaxCPU = "0.5"
-        }
+        Port = "5011:80"
+        HealthCheck = "curl -f http://localhost:80/health"
     }
     OrderService = @{
-        Url = "http://localhost:5012"
-        HealthEndpoint = "/health"
+        Name = "order_service"
         Container = "${script:NAMESPACE}_orders"
-        Required = $true
-        Resources = @{
-            MinMemory = "256M"
-            MaxMemory = "512M"
-            MinCPU = "0.1"
-            MaxCPU = "0.5"
-        }
+        Port = "5012:80"
+        HealthCheck = "curl -f http://localhost:80/health"
     }
     InventoryService = @{
-        Url = "http://localhost:5013"
-        HealthEndpoint = "/health"
+        Name = "inventory_service"
         Container = "${script:NAMESPACE}_inventory"
-        Required = $true
-        Resources = @{
-            MinMemory = "256M"
-            MaxMemory = "512M"
-            MinCPU = "0.1"
-            MaxCPU = "0.5"
-        }
+        Port = "5013:80"
+        HealthCheck = "curl -f http://localhost:80/health"
     }
     Grafana = @{
-        Url = "http://localhost:3001"
-        HealthEndpoint = "/api/health"
+        Name = "grafana"
         Container = "${script:NAMESPACE}_grafana"
-        Required = $true
-        Credentials = @{
-            Username = "admin"
-            Password = "InsightOps2024!"
-        }
-        Resources = @{
-            MinMemory = "512M"
-            MaxMemory = "1G"
-            MinCPU = "0.2"
-            MaxCPU = "0.7"
-        }
+        Port = "3001:3000"
+        HealthCheck = "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health"
     }
     Prometheus = @{
-        Url = "http://localhost:9091"
-        HealthEndpoint = "/-/healthy"
+        Name = "prometheus"
         Container = "${script:NAMESPACE}_prometheus"
-        Required = $true
-        Resources = @{
-            MinMemory = "512M"
-            MaxMemory = "1G"
-            MinCPU = "0.2"
-            MaxCPU = "0.7"
-        }
-        RetentionTime = "30d"
+        Port = "9091:9090"
+        HealthCheck = "wget --no-verbose --tries=1 --spider http://localhost:9090/-/healthy"
     }
     Loki = @{
-        Url = "http://localhost:3101"
-        HealthEndpoint = "/ready"
+        Name = "loki"
         Container = "${script:NAMESPACE}_loki"
-        Required = $true
-        Resources = @{
-            MinMemory = "512M"
-            MaxMemory = "1G"
-            MinCPU = "0.2"
-            MaxCPU = "0.7"
-        }
+        Port = "3101:3100"
+        HealthCheck = "wget --no-verbose --tries=1 --spider http://localhost:3100/ready"
     }
     Tempo = @{
-        Url = "http://localhost:4319"
-        HealthEndpoint = "/ready"
+        Name = "tempo"
         Container = "${script:NAMESPACE}_tempo"
-        Required = $true
-        Resources = @{
-            MinMemory = "512M"
-            MaxMemory = "1G"
-            MinCPU = "0.2"
-            MaxCPU = "0.7"
-        }
         Ports = @{
-            OTLP_GRPC = "4317"
-            OTLP_HTTP = "4318"
-            Tempo_Query = "3200"
-            Zipkin = "9411"
+            OTLP = "4317:4317"
+            HTTP = "4318:4318"
+            Query = "3200:3200"
         }
-    }
-    PostgreSQL = @{
-        Container = "${script:NAMESPACE}_db"
-        HealthEndpoint = ""  # Uses native PostgreSQL health check
-        Required = $true
-        Resources = @{
-            MinMemory = "512M"
-            MaxMemory = "1G"
-            MinCPU = "0.2"
-            MaxCPU = "0.7"
-        }
-        Credentials = @{
-            Username = "insightops_user"
-            Password = "insightops_pwd"
-            Database = "insightops_db"
-            Port = "5433"
-        }
-        ConnectionString = "Host=${script:NAMESPACE}_db;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd;Maximum Pool Size=100;Connection Idle Lifetime=60;Pooling=true;MinPoolSize=10"
+        HealthCheck = "wget --no-verbose --tries=1 --spider http://localhost:3200/ready"
     }
 }
 
-# Service groupings for dependencies and startup order
-$script:SERVICE_GROUPS = @{
-    Infrastructure = @(
-        "PostgreSQL"
-        "Prometheus"
-        "Loki"
-        "Tempo"
-        "Grafana"
-    )
-    Applications = @(
-        "OrderService"
-        "InventoryService"
-        "ApiGateway"
-        "Frontend"
-    )
-}
-
-# Service dependencies
-$script:SERVICE_DEPENDENCIES = @{
-    Frontend = @("ApiGateway")
-    ApiGateway = @("OrderService", "InventoryService")
-    OrderService = @("PostgreSQL", "Tempo")
-    InventoryService = @("PostgreSQL", "Tempo")
-    Grafana = @("Prometheus", "Loki", "Tempo")
-}
-
-# Required paths and files structure
-$script:REQUIRED_PATHS = @{
-    Directories = @(
-        (Join-Path $script:CONFIG_PATH "grafana/provisioning/datasources"),
-        (Join-Path $script:CONFIG_PATH "grafana/provisioning/dashboards"),
-        (Join-Path $script:CONFIG_PATH "prometheus/rules"),
-        (Join-Path $script:CONFIG_PATH "loki/rules"),
-        (Join-Path $script:CONFIG_PATH "tempo/rules"),
-        $script:LOGS_PATH,
-        $script:BACKUP_PATH
-    )
-    Files = @(
-        (Join-Path $script:CONFIG_PATH "docker-compose.yml"),
-        (Join-Path $script:CONFIG_PATH "prometheus.yml"),
-        (Join-Path $script:CONFIG_PATH "loki-config.yaml"),
-        (Join-Path $script:CONFIG_PATH "tempo.yaml"),
-        (Join-Path $script:CONFIG_PATH ".env")
-    )
-}
-
-# Health check configurations
-$script:HEALTH_CHECK_CONFIG = @{
-    Interval = "10s"
-    Timeout = "5s"
-    Retries = 3
-    StartPeriod = "30s"
-}
-
-# Core Functions
-function Initialize-Environment {
+function Test-Configuration {
     [CmdletBinding()]
     param()
     
-    Write-InfoMessage "Initializing InsightOps environment..."
-
     try {
-        # Create required directories
-        foreach ($dir in $script:REQUIRED_PATHS.Directories) {
-            if (-not (Test-Path -Path $dir)) {
-                New-Item -ItemType Directory -Path $dir -Force | Out-Null
-                Write-InfoMessage "Created directory: $dir"
+        # Initialize result
+        $configurationValid = $true
+        
+        Write-Host "Checking configuration files..." -ForegroundColor Cyan
+
+        # First check if base config directory exists
+        Write-Host "`nChecking required directories:" -ForegroundColor Cyan
+        
+        if (-not (Test-Path $script:CONFIG_PATH)) {
+            Write-Host "  ✗ Missing base configuration directory" -ForegroundColor Red
+            Initialize-DefaultConfigurations
+            return $false
+        }
+
+        # Check each required directory
+        $script:REQUIRED_PATHS | ForEach-Object {
+            $dir = $_
+            $dirName = Split-Path $dir -Leaf
+            if (Test-Path $dir) {
+                Write-Host "  ✓ Found directory: $dirName" -ForegroundColor Green
+            } else {
+                Write-Host "  ✗ Missing directory: $dirName" -ForegroundColor Red
+                $configurationValid = $false
             }
         }
 
-        # Create placeholder files if they don't exist
-        foreach ($file in $script:REQUIRED_PATHS.Files) {
-            if (-not (Test-Path -Path $file)) {
-                New-Item -ItemType File -Path $file -Force | Out-Null
-                Write-InfoMessage "Created placeholder file: $file"
+        # Check each required file
+        Write-Host "`nChecking configuration files:" -ForegroundColor Cyan
+        $script:REQUIRED_FILES.GetEnumerator() | ForEach-Object {
+            if (Test-Path $_.Value) {
+                Write-Host "  ✓ Found file: $($_.Key)" -ForegroundColor Green
+            } else {
+                Write-Host "  ✗ Missing file: $($_.Key)" -ForegroundColor Red
+                $configurationValid = $false
             }
         }
 
-        Write-SuccessMessage "Environment initialization completed successfully"
+        if (-not $configurationValid) {
+            Write-Host "`nMissing configurations detected. Initializing..." -ForegroundColor Yellow
+            Initialize-DefaultConfigurations
+            return $false
+        }
+
+        Write-Host "`nAll configurations verified successfully." -ForegroundColor Green
         return $true
     }
     catch {
-        Write-ErrorMessage "Failed to initialize environment: $_"
+        Write-Host "Configuration check failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Verbose "Stack Trace: $($_.ScriptStackTrace)"
         return $false
     }
 }
 
-function Get-ServiceConfig {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$ServiceName
-    )
-    
-    if ($script:SERVICES.ContainsKey($ServiceName)) {
-        return $script:SERVICES[$ServiceName]
-    }
-    
-    Write-ErrorMessage "Service configuration not found for: $ServiceName"
-    return $null
-}
-
-function Get-ServiceDependencies {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$ServiceName
-    )
-    
-    if ($script:SERVICE_DEPENDENCIES.ContainsKey($ServiceName)) {
-        return $script:SERVICE_DEPENDENCIES[$ServiceName]
-    }
-    
-    return @()
-}
-
-function Test-NetworkConnectivity {
+function Initialize-DefaultConfigurations {
     [CmdletBinding()]
     param()
     
     try {
-        Write-Information "Testing network connectivity..."
-        
-        $services = $script:SERVICES
+        Write-Host "`nInitializing configurations..." -ForegroundColor Cyan
 
-        foreach ($service in $services.GetEnumerator()) {
-            $serviceConfig = $service.Value
-            if (-not $serviceConfig.Url) { continue }
-
-            try {
-                $uri = [System.Uri]$serviceConfig.Url
-                $hostName = $uri.Host
-                $port = $uri.Port
-
-                $testResult = Test-NetConnection -ComputerName $hostName `
-                                               -Port $port `
-                                               -WarningAction SilentlyContinue `
-                                               -ErrorAction SilentlyContinue
-
-                if ($testResult.TcpTestSucceeded) {
-                    Write-Success "✓ $($service.Key) is accessible at $($serviceConfig.Url)"
-                }
-                else {
-                    Write-Warning "✗ $($service.Key) is not accessible at $($serviceConfig.Url)"
-                }
-            }
-            catch {
-                Write-Error "Failed to test $($service.Key): $_"
+        # Create directories first
+        foreach ($dir in $script:REQUIRED_PATHS) {
+            if (-not (Test-Path $dir)) {
+                $dirName = Split-Path $dir -Leaf
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+                Write-Host "  Created directory: $dirName" -ForegroundColor Green
             }
         }
+
+        # Create configuration files if they don't exist
+        foreach ($file in $script:REQUIRED_FILES.GetEnumerator()) {
+            if (-not (Test-Path $file.Value)) {
+                $content = switch ($file.Key) {
+                    "prometheus.yml" { Get-PrometheusConfig }
+                    "loki-config.yaml" { Get-LokiConfig }
+                    "tempo.yaml" { Get-TempoConfig }
+                    "docker-compose.yml" { Get-DockerComposeConfig }
+                    default { "" }
+                }
+
+                if ($content) {
+                    Set-Content -Path $file.Value -Value $content -Force
+                    Write-Host "  Created file: $($file.Key)" -ForegroundColor Green
+                }
+            }
+        }
+
+        # Set up environment files
+        Write-Host "`nSetting up environment configurations..." -ForegroundColor Cyan
+        Set-EnvironmentConfig -Environment "Development" -Force
+        Set-EnvironmentConfig -Environment "Production" -Force
+
+        Write-Host "`nConfiguration initialization completed." -ForegroundColor Green
         return $true
     }
     catch {
-        Write-Error "Network connectivity test failed: $_"
+        Write-Host "Failed to initialize configurations: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Verbose "Stack Trace: $($_.ScriptStackTrace)"
+        return $false
+    }
+}
+
+function Set-EnvironmentConfig {
+    [CmdletBinding()]
+    param(
+        [string]$Environment,
+        [switch]$Force
+    )
+    
+    $envFile = Join-Path $script:CONFIG_PATH ".env.$Environment"
+    
+    try {
+        # Basic environment variables
+        $envVars = @{
+            NAMESPACE = $script:NAMESPACE
+            ENVIRONMENT = $Environment
+            ASPNETCORE_ENVIRONMENT = $Environment
+            GRAFANA_USER = "admin"
+            GRAFANA_PASSWORD = "InsightOps2024!"
+            DB_USER = "insightops_user"
+            DB_PASSWORD = "insightops_pwd"
+            DB_NAME = "insightops_db"
+        }
+
+        # Add port mappings from service configuration
+        foreach ($service in $script:SERVICES.GetEnumerator()) {
+            if ($service.Value.Port) {
+                $port = $service.Value.Port.Split(':')[0]
+                $envVars["$($service.Key.ToUpper())_PORT"] = $port
+            }
+        }
+
+        # Create environment file content
+        $envContent = $envVars.GetEnumerator() | ForEach-Object {
+            "$($_.Key)=$($_.Value)"
+        }
+
+        # Write to file
+        Set-Content -Path $envFile -Value $envContent -Force
+        Write-Host "Updated environment configuration: $envFile" -ForegroundColor Green
+        
+        return $true
+    }
+    catch {
+        Write-Host "Failed to set environment configuration: $_" -ForegroundColor Red
         return $false
     }
 }
@@ -318,324 +253,349 @@ function Test-ServiceHealth {
     )
     
     try {
-        Write-Information "Checking service health..."
-        
         $servicesToCheck = if ($ServiceName) {
-            if ($script:SERVICES.ContainsKey($ServiceName)) {
-                @{ $ServiceName = $script:SERVICES[$ServiceName] }
-            }
-            else {
-                throw "Service '$ServiceName' not found in configuration"
-            }
-        }
-        else {
-            $script:SERVICES
+            @($script:SERVICES[$ServiceName])
+        } else {
+            $script:SERVICES.Values
         }
 
-        $results = @()
-        foreach ($service in $servicesToCheck.GetEnumerator()) {
-            $config = $service.Value
-            if (-not $config.Url -or -not $config.HealthEndpoint) { continue }
-
-            try {
-                $uri = "$($config.Url)$($config.HealthEndpoint)"
-                $response = Invoke-WebRequest -Uri $uri -Method GET -UseBasicParsing -TimeoutSec 5
-
-                $status = if ($response.StatusCode -eq 200) {
-                    Write-Success "✓ $($service.Key) is healthy"
-                    "Healthy"
-                }
-                else {
-                    Write-Warning "⚠ $($service.Key) returned status code: $($response.StatusCode)"
-                    "Unhealthy"
-                }
-            }
-            catch {
-                Write-Error "✗ $($service.Key) health check failed: $_"
-                $status = "Error"
-            }
-
-            $results += [PSCustomObject]@{
-                Service = $service.Key
-                Status = $status
-                Endpoint = $uri
+        foreach ($service in $servicesToCheck) {
+            $container = $service.Container
+            $status = docker inspect --format='{{.State.Health.Status}}' $container 2>$null
+            
+            if ($status) {
+                Write-Host "$($service.Name): $status" -ForegroundColor $(
+                    switch ($status) {
+                        "healthy" { "Green" }
+                        "unhealthy" { "Red" }
+                        default { "Yellow" }
+                    }
+                )
+            } else {
+                Write-Host "$($service.Name): container not found" -ForegroundColor Red
             }
         }
-
-        if ($results.Count -gt 0) {
-            Write-Host "`nService Health Status:" -ForegroundColor Cyan
-            $results | Format-Table -AutoSize
-        }
-
+        
         return $true
     }
     catch {
-        Write-Error "Service health check failed: $_"
+        Write-Host "Health check failed: $_" -ForegroundColor Red
         return $false
     }
 }
 
-function Test-Configuration {
-    [CmdletBinding()]
-    param()
+function Get-PrometheusConfig {
+    return @'
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
 
-    try {
-        Write-Information "Checking configuration files..."
+rule_files:
+  - "rules/*.yml"
 
-        # Required configuration files
-        $configRoot = "D:\Users\Pradeep\Downloads\Grafana solution architect demo\GrafanaDemo\InsightOps\Configurations"
-        $requiredFiles = @{
-            "Docker Compose" = Join-Path $configRoot "docker-compose.yml"
-            "Prometheus" = Join-Path $configRoot "prometheus.yml"
-            "Loki" = Join-Path $configRoot "loki-config.yaml"
-            "Tempo" = Join-Path $configRoot "tempo.yaml"
-        }
+scrape_configs:
+  - job_name: 'order_service'
+    static_configs:
+      - targets: ['${NAMESPACE:-insightops}_orders:80']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    honor_labels: true
 
-        $allValid = $true
-        foreach ($file in $requiredFiles.GetEnumerator()) {
-            if (Test-Path $file.Value) {
-                Write-Success " Found $($file.Key) configuration: $($file.Value)"
-            } else {
-                Write-Warning " Missing $($file.Key) configuration: $($file.Value)"
-                $allValid = $false
-            }
-        }
+  - job_name: 'inventory_service'
+    static_configs:
+      - targets: ['${NAMESPACE:-insightops}_inventory:80']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    honor_labels: true
 
-        if (-not $allValid) {
-            Write-Information "Attempting to create default configurations..."
-            Initialize-DefaultConfigurations -ConfigRoot $configRoot
-        }
+  - job_name: 'frontend'
+    static_configs:
+      - targets: ['${NAMESPACE:-insightops}_frontend:80']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    honor_labels: true
 
-        return $allValid
-    }
-    catch {
-        Write-Error "Configuration check failed: $_"
-        return $false
-    }
+  - job_name: 'api_gateway'
+    static_configs:
+      - targets: ['${NAMESPACE:-insightops}_gateway:80']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    honor_labels: true
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+'@
 }
 
-function _Test-Configuration {
-    [CmdletBinding()]
-    param()
+function Get-LokiConfig {
+    return @'
+auth_enabled: false
 
-    try {
-        Write-Information "Checking configuration files..."
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
 
-        # Required configuration files
-        $requiredFiles = @{
-            "Docker Compose" = $script:DOCKER_COMPOSE_FILE
-            "Prometheus" = Join-Path $script:CONFIG_ROOT "prometheus.yml"
-            "Loki" = Join-Path $script:CONFIG_ROOT "loki-config.yaml"
-            "Tempo" = Join-Path $script:CONFIG_ROOT "tempo.yaml"
-        }
+ingester:
+  lifecycler:
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+    final_sleep: 0s
+  chunk_idle_period: 5m
+  chunk_retain_period: 30s
 
-        $allValid = $true
-        foreach ($file in $requiredFiles.GetEnumerator()) {
-            if (Test-Path $file.Value) {
-                Write-Success " Found $($file.Key) configuration: $($file.Value)"
-            } else {
-                Write-Warning " Missing $($file.Key) configuration: $($file.Value)"
-                $allValid = $false
-            }
-        }
+schema_config:
+  configs:
+    - from: 2020-05-15
+      store: boltdb
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
 
-        if (-not $allValid) {
-            Write-Information "Attempting to create default configurations..."
-            Initialize-DefaultConfigurations
-        }
+storage_config:
+  boltdb:
+    directory: /tmp/loki/index
 
-        return $allValid
-    }
-    catch {
-        Write-Error "Configuration check failed: $_"
-        return $false
-    }
+  filesystem:
+    directory: /tmp/loki/chunks
+'@
 }
 
-function Initialize-DefaultConfigurations {
-    [CmdletBinding()]
-    param(
-        [string]$ConfigRoot
-    )
+function Get-TempoConfig {
+    return @'
+server:
+  http_listen_port: 3200
 
-    try {
-        # Create Configurations directory if it doesn't exist
-        if (-not (Test-Path $ConfigRoot)) {
-            New-Item -ItemType Directory -Path $ConfigRoot -Force | Out-Null
-            Write-Success "Created Configurations directory"
-        }
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
 
-        # Default configurations content...
-
-        # Write docker-compose.yml
-        $dockerComposeFilePath = Join-Path $ConfigRoot "docker-compose.yml"
-        if (-not (Test-Path $dockerComposeFilePath)) {
-            Set-Content -Path $dockerComposeFilePath -Value $dockerComposeContent
-            Write-Success "Created default docker-compose.yml"
-        }
-
-        # Similarly, create other default configurations...
-    }
-    catch {
-        Write-Error "Failed to initialize default configurations: $_"
-        return $false
-    }
+storage:
+  trace:
+    backend: local
+    local:
+      path: /tmp/tempo/blocks
+'@
 }
 
-function _Initialize-DefaultConfigurations {
-    [CmdletBinding()]
-    param()
-
-    try {
-        # Create Configurations directory if it doesn't exist
-        if (-not (Test-Path $script:CONFIG_ROOT)) {
-            New-Item -ItemType Directory -Path $script:CONFIG_ROOT -Force | Out-Null
-            Write-Success "Created Configurations directory"
-        }
-
-        # Default docker-compose.yml content with correct PowerShell escaping
-        $dockerComposeContent = @"
+function Get-DockerComposeConfig {
+    return @'
 version: '3.8'
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-healthcheck: &default-healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
 
 services:
   postgres:
     image: postgres:13
-    container_name: "$($script:NAMESPACE)_db"
+    container_name: ${NAMESPACE:-insightops}_db
     environment:
-      POSTGRES_USER: "`${DB_USER:-insightops_user}"
-      POSTGRES_PASSWORD: "`${DB_PASSWORD:-insightops_pwd}"
-      POSTGRES_DB: "`${DB_NAME:-insightops_db}"
+      POSTGRES_USER: ${DB_USER:-insightops_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-insightops_pwd}
+      POSTGRES_DB: ${DB_NAME:-insightops_db}
     volumes:
-      - "postgres_data:/var/lib/postgresql/data"
+      - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5433:5432"
-    networks:
-      - "$($script:NAMESPACE)_network"
+      - "${DB_PORT:-5433}:5432"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-insightops_user} -d ${DB_NAME:-insightops_db}"]
+    logging: *default-logging
 
   grafana:
     image: grafana/grafana:latest
-    container_name: "$($script:NAMESPACE)_grafana"
+    container_name: ${NAMESPACE:-insightops}_grafana
     environment:
-      - "GF_SECURITY_ADMIN_USER=admin"
-      - "GF_SECURITY_ADMIN_PASSWORD=InsightOps2024!"
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-InsightOps2024!}
     volumes:
-      - "grafana_data:/var/lib/grafana"
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
     ports:
-      - "3001:3000"
-    networks:
-      - "$($script:NAMESPACE)_network"
+      - "${GRAFANA_PORT:-3001}:3000"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health"]
+    logging: *default-logging
 
   prometheus:
     image: prom/prometheus:latest
-    container_name: "$($script:NAMESPACE)_prometheus"
+    container_name: ${NAMESPACE:-insightops}_prometheus
     volumes:
-      - "./prometheus.yml:/etc/prometheus/prometheus.yml"
-      - "prometheus_data:/prometheus"
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
     ports:
-      - "9091:9090"
-    networks:
-      - "$($script:NAMESPACE)_network"
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+    logging: *default-logging
 
-  loki:
-    image: grafana/loki:2.9.3
-    container_name: "$($script:NAMESPACE)_loki"
+loki:
+    container_name: ${NAMESPACE:-insightops}_loki
     volumes:
-      - "./loki-config.yaml:/etc/loki/config.yaml"
-      - "loki_data:/loki"
+      - ./loki-config.yaml:/etc/loki/local-config.yaml
+      - loki_data:/loki
     ports:
-      - "3101:3100"
-    networks:
-      - "$($script:NAMESPACE)_network"
+      - "${LOKI_PORT:-3101}:3100"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready"]
+    logging: *default-logging
 
   tempo:
     image: grafana/tempo:latest
-    container_name: "$($script:NAMESPACE)_tempo"
+    container_name: ${NAMESPACE:-insightops}_tempo
+    command: [ "-config.file=/etc/tempo/tempo.yaml" ]
     volumes:
-      - "./tempo.yaml:/etc/tempo.yaml"
-      - "tempo_data:/tmp/tempo"
+      - ./tempo.yaml:/etc/tempo/tempo.yaml
+      - tempo_data:/tmp/tempo
     ports:
-      - "4317:4317"
-      - "4318:4318"
-    networks:
-      - "$($script:NAMESPACE)_network"
+      - "${TEMPO_PORT:-4317}:4317"
+      - "${TEMPO_PORT_HTTP:-4318}:4318"
+      - "3200:3200"
+      - "9411:9411"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
+      start_period: 45s
+    logging: *default-logging
+
+  frontend:
+    build: 
+      context: ${BUILD_CONTEXT:-..}/FrontendService
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    container_name: ${NAMESPACE:-insightops}_frontend
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ENVIRONMENT:-Production}
+      - ApiGateway__Url=http://${NAMESPACE:-insightops}_gateway
+      - OpenTelemetry__Enabled=true
+      - OpenTelemetry__ServiceName=frontend-service
+      - OpenTelemetry__OtlpEndpoint=http://${NAMESPACE:-insightops}_tempo:4317
+    ports:
+      - "${FRONTEND_PORT:-5010}:80"
+    depends_on:
+      api_gateway:
+        condition: service_healthy
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+    logging: *default-logging
+
+  api_gateway:
+    build: 
+      context: ${BUILD_CONTEXT:-..}/ApiGateway
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    container_name: ${NAMESPACE:-insightops}_gateway
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ENVIRONMENT:-Production}
+      - Services__OrderService=http://${NAMESPACE:-insightops}_orders
+      - Services__InventoryService=http://${NAMESPACE:-insightops}_inventory
+      - OpenTelemetry__Enabled=true
+      - OpenTelemetry__ServiceName=api-gateway
+      - OpenTelemetry__OtlpEndpoint=http://${NAMESPACE:-insightops}_tempo:4317
+    ports:
+      - "${GATEWAY_PORT:-5011}:80"
+    depends_on:
+      order_service:
+        condition: service_healthy
+      inventory_service:
+        condition: service_healthy
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+    logging: *default-logging
+
+  order_service:
+    build: 
+      context: ${BUILD_CONTEXT:-..}/OrderService
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    container_name: ${NAMESPACE:-insightops}_orders
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ENVIRONMENT:-Production}
+      - ConnectionStrings__Postgres=Host=${NAMESPACE:-insightops}_db;Database=${DB_NAME:-insightops_db};Username=${DB_USER:-insightops_user};Password=${DB_PASSWORD:-insightops_pwd}
+      - OpenTelemetry__Enabled=true
+      - OpenTelemetry__ServiceName=order-service
+      - OpenTelemetry__OtlpEndpoint=http://${NAMESPACE:-insightops}_tempo:4317
+    ports:
+      - "${ORDER_PORT:-5012}:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+    logging: *default-logging
+
+  inventory_service:
+    build: 
+      context: ${BUILD_CONTEXT:-..}/InventoryService
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    container_name: ${NAMESPACE:-insightops}_inventory
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ENVIRONMENT:-Production}
+      - ConnectionStrings__Postgres=Host=${NAMESPACE:-insightops}_db;Database=${DB_NAME:-insightops_db};Username=${DB_USER:-insightops_user};Password=${DB_PASSWORD:-insightops_pwd}
+      - OpenTelemetry__Enabled=true
+      - OpenTelemetry__ServiceName=inventory-service
+      - OpenTelemetry__OtlpEndpoint=http://${NAMESPACE:-insightops}_tempo:4317
+    ports:
+      - "${INVENTORY_PORT:-5013}:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+    logging: *default-logging
 
 volumes:
   postgres_data:
-    name: "$($script:NAMESPACE)_postgres_data"
+    name: ${NAMESPACE:-insightops}_postgres_data
   grafana_data:
-    name: "$($script:NAMESPACE)_grafana_data"
+    name: ${NAMESPACE:-insightops}_grafana_data
   prometheus_data:
-    name: "$($script:NAMESPACE)_prometheus_data"
+    name: ${NAMESPACE:-insightops}_prometheus_data
   loki_data:
-    name: "$($script:NAMESPACE)_loki_data"
+    name: ${NAMESPACE:-insightops}_loki_data
   tempo_data:
-    name: "$($script:NAMESPACE)_tempo_data"
+    name: ${NAMESPACE:-insightops}_tempo_data
 
 networks:
-  "$($script:NAMESPACE)_network":
-    name: "$($script:NAMESPACE)_network"
+  default:
+    name: ${NAMESPACE:-insightops}_network
     driver: bridge
-"@
-
-        # Write docker-compose.yml
-        $dockerComposeFilePath = Join-Path $script:CONFIG_ROOT "docker-compose.yml"
-        if (-not (Test-Path $dockerComposeFilePath)) {
-            Set-Content -Path $dockerComposeFilePath -Value $dockerComposeContent
-            Write-Success "Created default docker-compose.yml"
-        }
-
-        # Create other default configurations
-        $lokiConfigContent = @"
-# Loki configuration content here
-"@
-        $lokiConfigFilePath = Join-Path $script:CONFIG_ROOT "loki-config.yaml"
-        Set-Content -Path $lokiConfigFilePath -Value $lokiConfigContent
-        Write-Success "Created default loki-config.yaml"
-
-        $prometheusConfigContent = @"
-# Prometheus configuration content here
-"@
-        $prometheusConfigFilePath = Join-Path $script:CONFIG_ROOT "prometheus.yml"
-        Set-Content -Path $prometheusConfigFilePath -Value $prometheusConfigContent
-        Write-Success "Created default prometheus.yml"
-
-        $tempoConfigContent = @"
-# Tempo configuration content here
-"@
-        $tempoConfigFilePath = Join-Path $script:CONFIG_ROOT "tempo.yaml"
-        Set-Content -Path $tempoConfigFilePath -Value $tempoConfigContent
-        Write-Success "Created default tempo.yaml"
-
-        return $true
-    }
-    catch {
-        Write-Error "Failed to initialize default configurations: $_"
-        return $false
-    }
+'@
 }
 
 # Export module members
 Export-ModuleMember -Function @(
-    'Initialize-Environment',
-    'Get-ServiceConfig',
-    'Get-ServiceDependencies',
-    'Test-ServiceHealth',
-	'Test-NetworkConnectivity',
-    'Test-ServiceHealth',
-	'Test-Configuration',
-    'Initialize-DefaultConfigurations'
+    'Test-Configuration',
+    'Initialize-DefaultConfigurations',
+    'Set-EnvironmentConfig',
+    'Test-ServiceHealth'
 ) -Variable @(
     'NAMESPACE',
-    'PROJECT_NAME',
-    'ENVIRONMENT',
     'SERVICES',
-    'SERVICE_GROUPS',
-    'SERVICE_DEPENDENCIES',
     'CONFIG_PATH',
-    'LOGS_PATH',
-    'BACKUP_PATH',
-    'REQUIRED_PATHS',
-    'HEALTH_CHECK_CONFIG',
-	'CONFIG_ROOT',
-    'DOCKER_COMPOSE_FILE'
+    'REQUIRED_FILES',
+    'REQUIRED_PATHS'
 )
