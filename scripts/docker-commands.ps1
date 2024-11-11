@@ -1,23 +1,18 @@
-# Script Configuration
+#region Script Configuration
+
+# Set error handling preferences
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
-# Check PowerShell Version and switch if needed
-if ($PSVersionTable.PSVersion.Major -lt 7) {
-    $ps7Path = @(
-        "${env:ProgramFiles}\PowerShell\7\pwsh.exe",
-        "${env:ProgramFiles(x86)}\PowerShell\7\pwsh.exe",
-        "$env:LocalAppData\Microsoft\PowerShell\7\pwsh.exe"
-    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+# Load Required Modules
+$modulePath = Join-Path -Path $PSScriptRoot -ChildPath "Modules"
+Import-Module (Join-Path $modulePath "Logging.psm1")
+Import-Module (Join-Path $modulePath "Utilities.psm1")
+Import-Module (Join-Path $modulePath "Prerequisites.psm1")
 
-    if ($ps7Path) {
-        Write-Host "Switching to PowerShell 7..."
-        Start-Process -FilePath $ps7Path -ArgumentList "-File `"$PSCommandPath`"" -NoNewWindow -Wait
-        exit
-    }
-    else {
-        Write-Host "PowerShell 7 is recommended but not found. Continuing with PowerShell $($PSVersionTable.PSVersion)..." -ForegroundColor Yellow
-    }
-}
+#endregion
+
+#region Path Configuration
 
 # Script Paths
 $scriptPath = $PSScriptRoot
@@ -26,16 +21,40 @@ $configDir = Join-Path $rootDir "Configurations"
 $logsDir = Join-Path $rootDir "logs"
 $grafanaDir = Join-Path $configDir "grafana"
 
-# Color Configuration
-$COLORS = @{
-    Success = "Green"
-    Error = "Red"
-    Warning = "Yellow"
-    Info = "Cyan"
-    Header = "Magenta"
+# Required Directories
+$requiredDirectories = @(
+    "$configDir",                          
+    "$configDir\grafana\provisioning\dashboards", 
+    "$configDir\grafana\provisioning\datasources",
+    "$configDir\prometheus",              
+    "$configDir\loki",                     
+    "$configDir\tempo",                    
+    "$configDir\tempo\blocks",             
+    "$configDir\tempo\wal",                
+    "$logsDir"                             
+)
+
+#endregion
+
+#region Initialization
+
+# Ensure required directories exist
+function Initialize-RequiredDirectories {
+    Log-Message "Ensuring required directories exist..." -Level "INFO"
+    foreach ($directory in $requiredDirectories) {
+        if (-not (Test-Path $directory)) {
+            New-Item -Path $directory -ItemType Directory -Force | Out-Null
+            Log-Message "Created missing directory: $directory" -Level "INFO"
+        }
+    }
 }
 
-# Service Configuration
+Initialize-RequiredDirectories
+
+#endregion
+
+#region Service Configuration
+
 $SERVICES = @{
     Frontend = @{
         Url = "http://localhost:5010"
@@ -68,26 +87,10 @@ $SERVICES = @{
     }
 }
 
-# Import init-insightops.ps1 if it exists
-$initScript = Join-Path $scriptPath "init-insightops.ps1"
-if (Test-Path $initScript) {
-    . $initScript
-}
+#endregion
 
-# Functions
-function Write-ColorMessage($Message, $Color) {
-    $originalColor = $host.UI.RawUI.ForegroundColor
-    $host.UI.RawUI.ForegroundColor = $Color
-    Write-Host $Message
-    $host.UI.RawUI.ForegroundColor = $originalColor
-}
+#region Core Functions
 
-function Write-Success($message) { Write-ColorMessage $message $COLORS.Success }
-function Write-Info($message) { Write-ColorMessage $message $COLORS.Info }
-function Write-Warning($message) { Write-ColorMessage $message $COLORS.Warning }
-function Write-Error($message) { Write-ColorMessage $message $COLORS.Error }
-
-# Menu Function
 function Show-Menu {
     Write-ColorMessage "`nInsightOps Docker Management" $COLORS.Header
     Write-ColorMessage "=== Services Management ===" $COLORS.Info
@@ -111,28 +114,15 @@ function Show-Menu {
     Write-Host "15. View system metrics"
     Write-Host "16. Export container logs"
     Write-Host "17. Backup configuration"
+    Write-Host "18. Test configuration"
+    Write-Host "19. Test network connectivity"
+    Write-Host "20. Initialize required directories"
     Write-Host "0.  Exit"
 }
 
-# Main Functions
-function Show-ContainerStatus {
-    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-}
+#endregion
 
-function Show-ResourceUsage {
-    docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}"
-}
-
-function Clean-DockerSystem {
-    Write-Info "This will remove all containers and volumes. Continue? (y/N)"
-    $confirm = Read-Host
-    if ($confirm -eq 'y') {
-        Set-Location $configDir
-        docker-compose down -v
-        docker system prune -f
-        Write-Success "Docker system cleaned"
-    }
-}
+#region Directory and Backup Functions
 
 function Export-ContainerLogs {
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -147,14 +137,27 @@ function Export-ContainerLogs {
     }
 }
 
-# Main Execution
+function Backup-Configuration {
+    Write-Info "Backing up configuration..."
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $backupDir = "backup_$timestamp"
+    New-Item -ItemType Directory -Force -Path $backupDir
+    Copy-Item -Path "$configDir/*" -Destination $backupDir -Recurse
+    Write-Success "Configuration backed up to: $backupDir"
+}
+
+#endregion
+
+#region Main Execution Loop
+
 try {
     Write-Info "Starting InsightOps Docker Management..."
-    Check-Prerequisites
+    Initialize-RequiredDirectories
+    Check-Prerequisites  # Imported from Prerequisites.psm1
 
     while ($true) {
         Show-Menu
-        $choice = Read-Host "`nEnter your choice (0-17)"
+        $choice = Read-Host "`nEnter your choice (0-20)"
         
         switch ($choice) {
             0 { exit }
@@ -185,6 +188,9 @@ try {
             15 { docker stats }
             16 { Export-ContainerLogs }
             17 { Backup-Configuration }
+            18 { Test-Configuration }
+            19 { Test-NetworkConnectivity }
+            20 { Initialize-Directories }
             default { Write-Warning "Invalid option" }
         }
 
@@ -196,5 +202,8 @@ try {
 }
 catch {
     Write-Error "An error occurred: $_"
+    Log-Message "An error occurred: $_" -Level "ERROR"
     exit 1
 }
+
+#endregion

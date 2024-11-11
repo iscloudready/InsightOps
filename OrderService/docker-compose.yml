@@ -1,0 +1,83 @@
+﻿version: '3.8'
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: postgres
+    environment:
+      POSTGRES_DB: demo_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  orderservice:
+    build:
+      context: ./OrderService
+      dockerfile: Dockerfile
+    container_name: orderservice
+    environment:
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=demo_db;Username=postgres;Password=postgres
+    ports:
+      - "5001:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
+  inventoryservice:
+    build:
+      context: ./InventoryService
+      dockerfile: Dockerfile
+    container_name: inventoryservice
+    environment:
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=demo_db;Username=postgres;Password=postgres
+    ports:
+      - "5002:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
+  apigateway:
+    build:
+      context: ./ApiGateway
+      dockerfile: Dockerfile
+    container_name: apigateway
+    ports:
+      - "5000:80"
+    depends_on:
+      - orderservice
+      - inventoryservice
+    networks:
+      - microservices-net
+
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "5003:80"
+    depends_on:
+      - apigateway
+    networks:
+      - microservices-net
+
+networks:
+  microservices-net:
+    driver: bridge
+
+volumes:
+  postgres_data:

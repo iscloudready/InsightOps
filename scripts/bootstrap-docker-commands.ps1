@@ -1,28 +1,22 @@
-$ps7Path = @(
-    "${env:ProgramFiles}\PowerShell\7\pwsh.exe",
-    "${env:ProgramFiles(x86)}\PowerShell\7\pwsh.exe",
-    "$env:LocalAppData\Microsoft\PowerShell\7\pwsh.exe"
-) | Where-Object { Test-Path $_ } | Select-Object -First 1
+# bootstrap-docker-commands.ps1
+# Ensures PowerShell 7 and checks for system prerequisites via check-prereqs.ps1
 
-if (-not $ps7Path) {
-    Write-Host "PowerShell 7 is required but not found. Would you like to install it? (Y/N)" -ForegroundColor Yellow
-    $response = Read-Host
-    if ($response -eq 'Y') {
-        Write-Host "Installing PowerShell 7..."
-        winget install --id Microsoft.Powershell --source winget
-        Write-Host "Please restart your terminal and run the script again." -ForegroundColor Green
-    }
-    else {
-        Write-Host "PowerShell 7 is required to run this script." -ForegroundColor Red
-    }
-    exit 1
-}
-
+# Ensure PowerShell 7 is used
 if ($PSVersionTable.PSVersion.Major -lt 7) {
-    Write-Host "Switching to PowerShell 7..."
-    Start-Process -FilePath $ps7Path -ArgumentList "-File `"$PSScriptRoot\docker-commands.ps1`"" -NoNewWindow -Wait
-    exit $LASTEXITCODE
+    $ps7Path = @(
+        "${env:ProgramFiles}\PowerShell\7\pwsh.exe",
+        "${env:ProgramFiles(x86)}\PowerShell\7\pwsh.exe",
+        "$env:LocalAppData\Microsoft\PowerShell\7\pwsh.exe"
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+    if ($ps7Path) {
+        Write-Host "Switching to PowerShell 7..."
+        Start-Process -FilePath $ps7Path -ArgumentList "-File `"$PSCommandPath`"" -NoNewWindow -Wait
+        exit
+    } else {
+        Write-Host "PowerShell 7 not found. Continuing with PowerShell $($PSVersionTable.PSVersion)..." -ForegroundColor Yellow
+    }
 }
-else {
-    & "$PSScriptRoot\docker-commands.ps1"
-}
+
+# Run check-prereqs.ps1 for prerequisite checks
+& "$PSScriptRoot\check-prereqs.ps1" @PSBoundParameters
