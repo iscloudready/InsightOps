@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13
+    container_name: "insightops_db"
+    environment:
+      POSTGRES_USER: "${DB_USER:-insightops_user}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-insightops_pwd}"
+      POSTGRES_DB: "${DB_NAME:-insightops_db}"
+    volumes:
+      - "postgres_data:/var/lib/postgresql/data"
+    ports:
+      - "5433:5432"
+    networks:
+      - "insightops_network"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: "insightops_grafana"
+    environment:
+      - "GF_SECURITY_ADMIN_USER=admin"
+      - "GF_SECURITY_ADMIN_PASSWORD=InsightOps2024!"
+    volumes:
+      - "grafana_data:/var/lib/grafana"
+    ports:
+      - "3001:3000"
+    networks:
+      - "insightops_network"
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: "insightops_prometheus"
+    volumes:
+      - "./prometheus.yml:/etc/prometheus/prometheus.yml"
+      - "prometheus_data:/prometheus"
+    ports:
+      - "9091:9090"
+    networks:
+      - "insightops_network"
+
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: "insightops_loki"
+    volumes:
+      - "./loki-config.yaml:/etc/loki/config.yaml"
+      - "loki_data:/loki"
+    ports:
+      - "3101:3100"
+    networks:
+      - "insightops_network"
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: "insightops_tempo"
+    volumes:
+      - "./tempo.yaml:/etc/tempo.yaml"
+      - "tempo_data:/tmp/tempo"
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    networks:
+      - "insightops_network"
+
+volumes:
+  postgres_data:
+    name: "insightops_postgres_data"
+  grafana_data:
+    name: "insightops_grafana_data"
+  prometheus_data:
+    name: "insightops_prometheus_data"
+  loki_data:
+    name: "insightops_loki_data"
+  tempo_data:
+    name: "insightops_tempo_data"
+
+networks:
+  "insightops_network":
+    name: "insightops_network"
+    driver: bridge

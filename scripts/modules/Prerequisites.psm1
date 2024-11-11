@@ -1,151 +1,189 @@
-# Module: Prerequisites.psm1
+# Prerequisites.psm1
+# Purpose: Check and validate all system requirements for InsightOps
 
-# Module for checking and ensuring prerequisites for InsightOps
+function Write-Info { param([string]$Message) Write-Host $Message -ForegroundColor Cyan }
+function Write-Success { param([string]$Message) Write-Host $Message -ForegroundColor Green }
+function Write-Warning { param([string]$Message) Write-Host $Message -ForegroundColor Yellow }
+function Write-Error { param([string]$Message) Write-Host $Message -ForegroundColor Red }
 
-# Function to write output in color
-function Write-OutputColored {
-    param (
-        [string]$Message,
-        [string]$Level = "INFO"
-    )
-    $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    $logEntry = "$timestamp [$Level] - $Message"
-    Write-Host $logEntry
+# Required versions and configurations
+$script:REQUIREMENTS = @{
+    DotNetSDK = [Version]"8.0.0"
+    PowerShell = [Version]"7.0.0"
+    MinDiskSpaceGB = 50
+    MinMemoryGB = 16
 }
 
-function Write-SuccessMessage { Write-OutputColored -Message $_ -Level "SUCCESS" }
-function Write-InfoMessage { Write-OutputColored -Message $_ -Level "INFO" }
-function Write-WarningMessage { Write-OutputColored -Message $_ -Level "WARNING" }
-function Write-ErrorMessage { Write-OutputColored -Message $_ -Level "ERROR" }
-
-# Check Docker Installation and Status
-function Test-Docker {
-    try {
-        $dockerVersion = docker --version
-        $dockerRunning = docker info 2>$null
-        if ($dockerRunning) {
-            Write-SuccessMessage "Docker is running - $dockerVersion"
-            return $true
-        } else {
-            Write-WarningMessage "Docker is installed but not running."
-            return $false
-        }
-    }
-    catch {
-        Write-ErrorMessage "Docker is not installed."
-        return $false
-    }
-}
-
-# Check .NET SDK Installation
 function Test-DotNetSDK {
+    [CmdletBinding()]
+    param()
+    
     try {
         $dotnetVersion = dotnet --version
-        $requiredVersion = [Version]"8.0.0"
         $currentVersion = [Version]$dotnetVersion
-        if ($currentVersion -ge $requiredVersion) {
-            Write-SuccessMessage ".NET SDK found: version $currentVersion"
+        if ($currentVersion -ge $script:REQUIREMENTS.DotNetSDK) {
+            Write-Success ".NET SDK found: version $currentVersion"
             return $true
         } else {
-            Write-WarningMessage ".NET SDK version is outdated (found $currentVersion, requires $requiredVersion)."
+            Write-Warning ".NET SDK version is outdated (found $currentVersion, requires $($script:REQUIREMENTS.DotNetSDK))."
             return $false
         }
     }
     catch {
-        Write-ErrorMessage ".NET SDK is not installed."
+        Write-Error ".NET SDK is not installed."
         return $false
     }
 }
 
-# Check PowerShell Version
-function Test-PowerShellVersion {
-    $requiredVersion = [Version]"7.0.0"
-    if ($PSVersionTable.PSVersion -ge $requiredVersion) {
-        Write-SuccessMessage "PowerShell version is compatible (found $($PSVersionTable.PSVersion))."
-        return $true
-    } else {
-        Write-ErrorMessage "PowerShell version is below required (found $($PSVersionTable.PSVersion), requires $requiredVersion)."
-        return $false
-    }
-}
-
-# Check Visual Studio Code Installation
-function Test-VSCodeInstallation {
+function Test-DockerInstallation {
+    [CmdletBinding()]
+    param()
+    
     try {
-        $vscodePath = Get-Command code -ErrorAction SilentlyContinue
-        if ($vscodePath) {
-            Write-SuccessMessage "Visual Studio Code is installed."
-            return $true
-        } else {
-            Write-WarningMessage "Visual Studio Code is not installed."
+        $dockerVersion = docker --version
+        $dockerComposeVersion = docker-compose --version
+        $dockerService = Get-Service docker -ErrorAction SilentlyContinue
+
+        if (-not $dockerService) {
+            Write-Error "Docker service is not installed"
             return $false
         }
+
+        if ($dockerService.Status -ne 'Running') {
+            Write-Warning "Docker service is not running"
+            return $false
+        }
+
+        Write-Success "Docker is installed: $dockerVersion"
+        Write-Success "Docker Compose is installed: $dockerComposeVersion"
+        return $true
     }
     catch {
-        Write-ErrorMessage "Visual Studio Code is not installed."
+        Write-Error "Docker check failed: $_"
         return $false
     }
 }
 
-# Check Visual Studio Installation
-function Test-VisualStudioInstallation {
-    $vsPath = "${env:ProgramFiles}\Microsoft Visual Studio\2022"
-    if (Test-Path -Path $vsPath) {
-        Write-SuccessMessage "Visual Studio 2022 is installed."
-        return $true
-    } else {
-        Write-WarningMessage "Visual Studio 2022 is not installed."
-        return $false
-    }
-}
-
-# Check Git Installation
 function Test-Git {
+    [CmdletBinding()]
+    param()
+    
     try {
         $gitVersion = git --version
-        Write-SuccessMessage "Git is installed - $gitVersion"
+        Write-Success "Git is installed: $gitVersion"
         return $true
     }
     catch {
-        Write-ErrorMessage "Git is not installed."
+        Write-Error "Git is not installed"
         return $false
     }
 }
 
-# Check Disk Space
+function Test-PowerShellVersion {
+    [CmdletBinding()]
+    param()
+    
+    $currentVersion = $PSVersionTable.PSVersion
+    if ($currentVersion -ge $script:REQUIREMENTS.PowerShell) {
+        Write-Success "PowerShell version $currentVersion is compatible"
+        return $true
+    }
+    else {
+        Write-Error "PowerShell version $currentVersion is below required version $($script:REQUIREMENTS.PowerShell)"
+        return $false
+    }
+}
+
+function Test-VSCodeInstallation {
+    [CmdletBinding()]
+    param()
+    
+    try {
+        $codePath = Get-Command code -ErrorAction Stop
+        Write-Success "Visual Studio Code is installed: $($codePath.Version)"
+        return $true
+    }
+    catch {
+        Write-Warning "Visual Studio Code is not installed or not in PATH"
+        return $false
+    }
+}
+
+function Test-VisualStudioInstallation {
+    [CmdletBinding()]
+    param()
+    
+    try {
+        $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        if (Test-Path $vsWhere) {
+            $vsInstallation = & $vsWhere -latest -format json | ConvertFrom-Json
+            if ($vsInstallation) {
+                Write-Success "Visual Studio is installed: $($vsInstallation.displayName)"
+                return $true
+            }
+        }
+        Write-Warning "Visual Studio is not installed"
+        return $false
+    }
+    catch {
+        Write-Error "Visual Studio check failed: $_"
+        return $false
+    }
+}
+
 function Test-DiskSpaceAvailability {
-    $requiredSpaceGB = 50
-    $driveInfo = Get-PSDrive -Name C
-    $freeSpaceGB = [math]::Round($driveInfo.Free / 1GB, 2)
-    if ($freeSpaceGB -gt $requiredSpaceGB) {
-        Write-SuccessMessage "Sufficient disk space available: ${freeSpaceGB}GB"
-        return $true
-    } else {
-        Write-WarningMessage "Insufficient disk space: only ${freeSpaceGB}GB available (requires $requiredSpaceGB GB)."
+    [CmdletBinding()]
+    param()
+    
+    try {
+        $drive = Get-PSDrive -Name C
+        $freeSpaceGB = [math]::Round($drive.Free / 1GB, 2)
+        
+        if ($freeSpaceGB -ge $script:REQUIREMENTS.MinDiskSpaceGB) {
+            Write-Success "Sufficient disk space available: ${freeSpaceGB}GB"
+            return $true
+        }
+        else {
+            Write-Warning "Insufficient disk space: ${freeSpaceGB}GB (required: $($script:REQUIREMENTS.MinDiskSpaceGB)GB)"
+            return $false
+        }
+    }
+    catch {
+        Write-Error "Disk space check failed: $_"
         return $false
     }
 }
 
-# Check System Memory
 function Test-SystemMemoryAvailability {
-    $requiredMemoryGB = 16
-    $totalMemoryGB = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 2)
-    if ($totalMemoryGB -ge $requiredMemoryGB) {
-        Write-SuccessMessage "Sufficient system memory available: ${totalMemoryGB}GB"
-        return $true
-    } else {
-        Write-WarningMessage "Insufficient system memory: only ${totalMemoryGB}GB available (requires $requiredMemoryGB GB)."
+    [CmdletBinding()]
+    param()
+    
+    try {
+        $totalMemoryGB = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 2)
+        
+        if ($totalMemoryGB -ge $script:REQUIREMENTS.MinMemoryGB) {
+            Write-Success "Sufficient system memory: ${totalMemoryGB}GB"
+            return $true
+        }
+        else {
+            Write-Warning "Insufficient system memory: ${totalMemoryGB}GB (required: $($script:REQUIREMENTS.MinMemoryGB)GB)"
+            return $false
+        }
+    }
+    catch {
+        Write-Error "Memory check failed: $_"
         return $false
     }
 }
 
-# Main function to run all checks and summarize results
 function Test-AllPrerequisites {
-    Write-InfoMessage "Checking system prerequisites for InsightOps..."
+    [CmdletBinding()]
+    param()
+    
+    Write-Information "Checking system prerequisites for InsightOps..."
 
-    # Perform each check
-    $checkResults = @{
-        "Docker" = Test-Docker
+    $checks = @{
+        "Docker" = Test-DockerInstallation
         ".NET SDK" = Test-DotNetSDK
         "PowerShell Version" = Test-PowerShellVersion
         "Visual Studio Code" = Test-VSCodeInstallation
@@ -155,18 +193,42 @@ function Test-AllPrerequisites {
         "System Memory" = Test-SystemMemoryAvailability
     }
 
-    # Evaluate overall status
+    $results = @()
     $allPassed = $true
-    foreach ($result in $checkResults.Values) {
+
+    foreach ($check in $checks.GetEnumerator()) {
+        $result = $check.Value
+        $status = if ($result) { "[PASS]" } else { "[FAIL]" }
+        $results += [PSCustomObject]@{
+            Check = $check.Key
+            Status = $status
+            Passed = $result
+        }
         if (-not $result) { $allPassed = $false }
     }
 
+    # Display results in a formatted table
+    $results | Format-Table -AutoSize
+
     if ($allPassed) {
-        Write-SuccessMessage "All prerequisites are met!"
-    } else {
-        Write-WarningMessage "Some prerequisites are missing or need attention."
+        Write-Success "All prerequisites are met!"
     }
+    else {
+        Write-Warning "Some prerequisites need attention. Please review the results above."
+    }
+
+    return $allPassed
 }
 
-# Export functions for module use
-Export-ModuleMember -Function Test-AllPrerequisites
+# Export module members
+Export-ModuleMember -Function @(
+    'Test-AllPrerequisites',
+    'Test-DotNetSDK',
+    'Test-DockerInstallation',
+    'Test-Git',
+    'Test-PowerShellVersion',
+    'Test-VSCodeInstallation',
+    'Test-VisualStudioInstallation',
+    'Test-DiskSpaceAvailability',
+    'Test-SystemMemoryAvailability'
+)
