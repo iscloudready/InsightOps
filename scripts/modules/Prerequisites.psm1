@@ -180,49 +180,276 @@ function Test-AllPrerequisites {
     [CmdletBinding()]
     param()
     
-    Write-Information "Checking system prerequisites for InsightOps..."
-
-    $checks = @{
-        "Docker" = Test-DockerInstallation
-        ".NET SDK" = Test-DotNetSDK
-        "PowerShell Version" = Test-PowerShellVersion
-        "Visual Studio Code" = Test-VSCodeInstallation
-        "Visual Studio" = Test-VisualStudioInstallation
-        "Git" = Test-Git
-        "Disk Space" = Test-DiskSpaceAvailability
-        "System Memory" = Test-SystemMemoryAvailability
-    }
-
-    $results = @()
     $allPassed = $true
+    Write-Host "`nChecking System Prerequisites..." -ForegroundColor Cyan
 
-    foreach ($check in $checks.GetEnumerator()) {
-        $result = $check.Value
-        $status = if ($result) { "[PASS]" } else { "[FAIL]" }
-        $results += [PSCustomObject]@{
-            Check = $check.Key
-            Status = $status
-            Passed = $result
+    # Docker Check
+    try {
+        Write-Host "`nChecking Docker:" -ForegroundColor Yellow
+        $dockerVersion = docker --version 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  ✓ Docker installed: $dockerVersion" -ForegroundColor Green
+        } 
+        else {
+            Write-Host "  ✗ Docker not installed" -ForegroundColor Red
+            $allPassed = $false
         }
-        if (-not $result) { $allPassed = $false }
+    } 
+    catch {
+        Write-Host "  ✗ Docker check failed: $_" -ForegroundColor Red
+        $allPassed = $false
     }
 
-    # Display results in a formatted table
-    $results | Format-Table -AutoSize
+    # PowerShell Version Check
+    try {
+        Write-Host "`nChecking PowerShell:" -ForegroundColor Yellow
+        $psVersion = $PSVersionTable.PSVersion
+        Write-Host "  ✓ PowerShell Version: $psVersion" -ForegroundColor Green
+    } 
+    catch {
+        Write-Host "  ✗ PowerShell check failed: $_" -ForegroundColor Red
+        $allPassed = $false
+    }
 
+    # Disk Space Check
+    try {
+        Write-Host "`nChecking Disk Space:" -ForegroundColor Yellow
+        $disk = Get-WmiObject -Class Win32_LogicalDisk -Filter "DeviceID='$($env:SystemDrive)'"
+        $freeSpaceGB = [math]::Round($disk.FreeSpace / 1GB, 2)
+        Write-Host "  ✓ Free Space: ${freeSpaceGB}GB" -ForegroundColor Green
+    } 
+    catch {
+        Write-Host "  ✗ Disk check failed: $_" -ForegroundColor Red
+        $allPassed = $false
+    }
+
+    # Summary
+    Write-Host "`nPrerequisites Check Summary:" -ForegroundColor Cyan
     if ($allPassed) {
-        Write-Success "All prerequisites are met!"
-    }
+        Write-Host "All prerequisites met!" -ForegroundColor Green
+    } 
     else {
-        Write-Warning "Some prerequisites need attention. Please review the results above."
+        Write-Host "Some prerequisites need attention." -ForegroundColor Yellow
     }
 
     return $allPassed
 }
 
+function Test-Prerequisites {
+    [CmdletBinding()]
+    param([switch]$Quiet)
+    
+    try {
+        $dockerInfo = docker info 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+        if (-not $Quiet) {
+            Write-Host "Docker is not running." -ForegroundColor Red
+        }
+        return $false
+    } 
+    catch {
+        if (-not $Quiet) {
+            Write-Host "Prerequisites check failed." -ForegroundColor Red
+        }
+        return $false
+    }
+}
+
+function _Test-AllPrerequisites {
+    [CmdletBinding()]
+    param()
+    
+    Write-Host "`nChecking System Prerequisites..." -ForegroundColor Cyan
+    $allPassed = $true
+    $results = @()
+
+    # Check Docker Installation and Service
+    try {
+        Write-Host "`nChecking Docker:" -ForegroundColor Yellow
+        $dockerVersion = docker --version 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  ✓ Docker installed: $dockerVersion" -ForegroundColor Green
+            
+            # Check if Docker service is running
+            $dockerInfo = docker info 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  ✓ Docker service is running" -ForegroundColor Green
+            }
+            else {
+                Write-Host "  ✗ Docker service is not running" -ForegroundColor Red
+                Write-Host "    → Start Docker Desktop or run 'net start docker'" -ForegroundColor Yellow
+                $allPassed = $false
+            }
+        }
+        else {
+            Write-Host "  ✗ Docker is not installed" -ForegroundColor Red
+            Write-Host "    → Download and install Docker Desktop from: https://www.docker.com/products/docker-desktop" -ForegroundColor Yellow
+            $allPassed = $false
+        }
+    }
+    catch {
+        Write-Host "  ✗ Error checking Docker: $_" -ForegroundColor Red
+        Write-Host "    → Ensure Docker is installed and properly configured" -ForegroundColor Yellow
+        $allPassed = $false
+    }
+
+    # Check .NET SDK
+    try {
+        Write-Host "`nChecking .NET SDK:" -ForegroundColor Yellow
+        $dotnetVersion = dotnet --version 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  ✓ .NET SDK: $dotnetVersion" -ForegroundColor Green
+        }
+        else {
+            Write-Host "  ✗ .NET SDK not found" -ForegroundColor Red
+            Write-Host "    → Download from: https://dotnet.microsoft.com/download" -ForegroundColor Yellow
+            $allPassed = $false
+        }
+    }
+    catch {
+        Write-Host "  ✗ Error checking .NET SDK" -ForegroundColor Red
+        $allPassed = $false
+    }
+
+    # Check PowerShell Version
+    Write-Host "`nChecking PowerShell:" -ForegroundColor Yellow
+    $psVersion = $PSVersionTable.PSVersion
+    if ($psVersion.Major -ge 5) {
+        Write-Host "  ✓ PowerShell Version: $psVersion" -ForegroundColor Green
+    }
+    else {
+        Write-Host "  ✗ PowerShell version $psVersion is below recommended version 5.0" -ForegroundColor Red
+        Write-Host "    → Update PowerShell from: https://github.com/PowerShell/PowerShell" -ForegroundColor Yellow
+        $allPassed = $false
+    }
+
+    # Check Available Memory
+    try {
+        Write-Host "`nChecking System Resources:" -ForegroundColor Yellow
+        $computerSystem = Get-WmiObject -Class WIN32_OperatingSystem
+        $memory = [math]::Round($computerSystem.TotalVisibleMemorySize / 1MB, 2)
+        if ($memory -ge 8) {
+            Write-Host "  ✓ Memory: ${memory}GB Available" -ForegroundColor Green
+        }
+        else {
+            Write-Host "  ✗ Insufficient memory: ${memory}GB (Minimum 8GB recommended)" -ForegroundColor Red
+            $allPassed = $false
+        }
+    }
+    catch {
+        Write-Host "  ✗ Error checking system memory" -ForegroundColor Red
+        $allPassed = $false
+    }
+
+    # Check Disk Space
+    try {
+        $disk = Get-WmiObject -Class Win32_LogicalDisk -Filter "DeviceID='$($env:SystemDrive)'"
+        $freeSpaceGB = [math]::Round($disk.FreeSpace / 1GB, 2)
+        if ($freeSpaceGB -ge 10) {
+            Write-Host "  ✓ Disk Space: ${freeSpaceGB}GB Free" -ForegroundColor Green
+        }
+        else {
+            Write-Host "  ✗ Insufficient disk space: ${freeSpaceGB}GB (Minimum 10GB recommended)" -ForegroundColor Red
+            $allPassed = $false
+        }
+    }
+    catch {
+        Write-Host "  ✗ Error checking disk space" -ForegroundColor Red
+        $allPassed = $false
+    }
+
+    # Check Required Ports
+    try {
+        Write-Host "`nChecking Required Ports:" -ForegroundColor Yellow
+        $portsToCheck = @(
+            @{Port = 5010; Service = "Frontend"},
+            @{Port = 5011; Service = "API Gateway"},
+            @{Port = 5012; Service = "Order Service"},
+            @{Port = 5013; Service = "Inventory Service"},
+            @{Port = 3001; Service = "Grafana"},
+            @{Port = 9091; Service = "Prometheus"},
+            @{Port = 3101; Service = "Loki"},
+            @{Port = 4317; Service = "Tempo"}
+        )
+
+        foreach ($portCheck in $portsToCheck) {
+            $testResult = Test-NetConnection -ComputerName localhost -Port $portCheck.Port -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
+            if (-not $testResult.TcpTestSucceeded) {
+                Write-Host "  ✓ Port $($portCheck.Port) available for $($portCheck.Service)" -ForegroundColor Green
+            }
+            else {
+                Write-Host "  ✗ Port $($portCheck.Port) is in use (Required for $($portCheck.Service))" -ForegroundColor Red
+                $allPassed = $false
+            }
+        }
+    }
+    catch {
+        Write-Host "  ✗ Error checking ports" -ForegroundColor Red
+        $allPassed = $false
+    }
+
+    # Final Summary
+    Write-Host "`nPrerequisites Check Summary:" -ForegroundColor Cyan
+    if ($allPassed) {
+        Write-Host "All prerequisites met! System is ready for InsightOps." -ForegroundColor Green
+    }
+    else {
+        Write-Host "Some prerequisites need attention. Please address the items marked with ✗" -ForegroundColor Yellow
+        Write-Host "Run this check again after making the necessary changes." -ForegroundColor Yellow
+    }
+
+    return $allPassed
+}
+
+function _Test-Prerequisites {
+    [CmdletBinding()]
+    param(
+        [switch]$Quiet
+    )
+    
+    try {
+        # Quick check for Docker
+        $dockerRunning = $false
+        try {
+            $dockerInfo = docker info 2>&1
+            $dockerRunning = ($LASTEXITCODE -eq 0)
+        }
+        catch {
+            $dockerRunning = $false
+        }
+
+        if (-not $dockerRunning) {
+            if (-not $Quiet) {
+                Write-Host "Docker is not running. Please start Docker Desktop." -ForegroundColor Red
+                Write-Host "After starting Docker, try again." -ForegroundColor Yellow
+            }
+            return $false
+        }
+
+        # Quick check for configuration
+        if (-not (Test-Configuration)) {
+            if (-not $Quiet) {
+                Write-Host "Configuration check failed. Run 'Initialize Environment' first." -ForegroundColor Red
+            }
+            return $false
+        }
+
+        return $true
+    }
+    catch {
+        if (-not $Quiet) {
+            Write-Host "Prerequisite check failed: $_" -ForegroundColor Red
+        }
+        return $false
+    }
+}
+
 # Export module members
 Export-ModuleMember -Function @(
     'Test-AllPrerequisites',
+    'Test-Prerequisites'
     'Test-DotNetSDK',
     'Test-DockerInstallation',
     'Test-Git',

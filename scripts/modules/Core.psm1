@@ -96,6 +96,100 @@ function Test-Configuration {
     param()
     
     try {
+        Write-Host "`nChecking configurations..." -ForegroundColor Cyan
+
+        $configurationValid = $true
+        
+        # Check base directory
+        Write-Host "`nChecking Directories:" -ForegroundColor Cyan
+        foreach ($dir in $script:REQUIRED_PATHS) {
+            $dirName = Split-Path $dir -Leaf
+            if (Test-Path $dir) {
+                Write-Host "  [OK] $dirName" -ForegroundColor Green
+            } else {
+                Write-Host "  [MISSING] $dirName" -ForegroundColor Red
+                $configurationValid = $false
+            }
+        }
+
+        # Check files
+        Write-Host "`nChecking Files:" -ForegroundColor Cyan
+        foreach ($file in $script:REQUIRED_FILES.GetEnumerator()) {
+            if (Test-Path $file.Value) {
+                Write-Host "  [OK] $($file.Key)" -ForegroundColor Green
+            } else {
+                Write-Host "  [MISSING] $($file.Key)" -ForegroundColor Red
+                $configurationValid = $false
+            }
+        }
+
+        if (-not $configurationValid) {
+            Write-Host "`nSome configurations are missing. Running initialization..." -ForegroundColor Yellow
+            Initialize-DefaultConfigurations
+            return $false
+        }
+
+        Write-Host "`nAll configurations verified successfully." -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Host "Configuration check failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Debug $_.ScriptStackTrace
+        return $false
+    }
+}
+
+function Initialize-DefaultConfigurations {
+    [CmdletBinding()]
+    param()
+    
+    try {
+        Write-Host "`nInitializing configurations in: $script:CONFIG_PATH" -ForegroundColor Cyan
+
+        # Create directories
+        foreach ($dir in $script:REQUIRED_PATHS) {
+            if (-not (Test-Path $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+                Write-Host "  Created directory: $(Split-Path $dir -Leaf)" -ForegroundColor Green
+            }
+        }
+
+        # Create files
+        foreach ($file in $script:REQUIRED_FILES.GetEnumerator()) {
+            if (-not (Test-Path $file.Value)) {
+                $content = switch ($file.Key) {
+                    "prometheus.yml" { Get-PrometheusConfig }
+                    "loki-config.yaml" { Get-LokiConfig }
+                    "tempo.yaml" { Get-TempoConfig }
+                    "docker-compose.yml" { Get-DockerComposeConfig }
+                    default { "" }
+                }
+                if ($content) {
+                    Set-Content -Path $file.Value -Value $content -Force
+                    Write-Host "  Created file: $($file.Key)" -ForegroundColor Green
+                }
+            }
+        }
+
+        # Create environment files
+        Set-EnvironmentConfig -Environment "Development" -Force
+        Set-EnvironmentConfig -Environment "Production" -Force
+
+        Write-Host "`nConfiguration initialization completed." -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Host "`nFailed to initialize configurations: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Debug $_.ScriptStackTrace
+        return $false
+    }
+}
+
+function _Test-Configuration {
+    [CmdletBinding()]
+    param()
+    
+    try {
         # Initialize result
         $configurationValid = $true
         
