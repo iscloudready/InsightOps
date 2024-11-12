@@ -28,10 +28,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Documentations", "Documenta
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Scripts", "Scripts", "{40B47F99-0656-4A24-B78B-5D5C3955B27C}"
 	ProjectSection(SolutionItems) = preProject
-		scripts\bootstrap-docker-commands.ps1 = scripts\bootstrap-docker-commands.ps1
-		scripts\docker-commands.ps1 = scripts\docker-commands.ps1
-		scripts\docker-commands.sh = scripts\docker-commands.sh
-		scripts\init-insightops.ps1 = scripts\init-insightops.ps1
+		scripts\main.ps1 = scripts\main.ps1
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "grafana", "grafana", "{0BA45768-AFEB-40F6-9503-85B0B264C486}"
@@ -43,17 +40,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "datasources", "datasources"
 		Configurations\grafana\provisioning\datasources\datasources.yml = Configurations\grafana\provisioning\datasources\datasources.yml
 	EndProjectSection
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "utils", "utils", "{BBB9BF2B-6F4A-402C-B021-2D97D36BFA0E}"
-	ProjectSection(SolutionItems) = preProject
-		scripts\utils\check-prereqs.ps1 = scripts\utils\check-prereqs.ps1
-		scripts\utils\cleanup.ps1 = scripts\utils\cleanup.ps1
-		scripts\modules\Core.ps1 = scripts\modules\Core.ps1
-		scripts\utils\setup-environment.ps1 = scripts\utils\setup-environment.ps1
-	EndProjectSection
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Modules", "Modules", "{97D3A88E-D2A3-4BCC-9E9A-53655BA27EF0}"
 	ProjectSection(SolutionItems) = preProject
-		scripts\modules\Core.ps1 = scripts\modules\Core.ps1
+		scripts\modules\Core.psm1 = scripts\modules\Core.psm1
+		scripts\modules\DockerOperations.psm1 = scripts\modules\DockerOperations.psm1
+		scripts\modules\EnvironmentSetup.psm1 = scripts\modules\EnvironmentSetup.psm1
+		scripts\modules\Logging.psm1 = scripts\modules\Logging.psm1
+		scripts\modules\Prerequisites.psm1 = scripts\modules\Prerequisites.psm1
+		scripts\modules\Utilities.psm1 = scripts\modules\Utilities.psm1
 	EndProjectSection
 EndProject
 Global
@@ -86,7 +80,6 @@ Global
 		{0BA45768-AFEB-40F6-9503-85B0B264C486} = {5A0B0BB1-D4B0-4AAD-8839-D50B1FA46DE8}
 		{2E8106D9-CCB6-4D36-B5AB-900F531F5722} = {0BA45768-AFEB-40F6-9503-85B0B264C486}
 		{A601C610-E24C-4833-88D0-47F8A3FF4018} = {2E8106D9-CCB6-4D36-B5AB-900F531F5722}
-		{BBB9BF2B-6F4A-402C-B021-2D97D36BFA0E} = {40B47F99-0656-4A24-B78B-5D5C3955B27C}
 		{97D3A88E-D2A3-4BCC-9E9A-53655BA27EF0} = {40B47F99-0656-4A24-B78B-5D5C3955B27C}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution

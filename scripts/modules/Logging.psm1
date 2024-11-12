@@ -33,7 +33,7 @@ function Initialize-Logging {
         }
 
         # Test write access
-        Add-Content -Path $script:LOG_FILE -Value "Log initialized $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ErrorAction Continue
+        Add-Content -Path $script:LOG_FILE -Value "Log initialized $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ErrorAction Stop
         return $true
     }
     catch {
@@ -69,7 +69,7 @@ function Write-Log {
         $logMessage = "$timestamp [$Level] [$Source] - $Message"
         
         # Write to log file
-        Add-Content -Path $script:LOG_FILE -Value $logMessage -ErrorAction Continue
+        Add-Content -Path $script:LOG_FILE -Value $logMessage -ErrorAction Stop
         
         # Also write to console with appropriate color
         $color = switch ($Level) {
