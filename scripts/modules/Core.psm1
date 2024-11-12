@@ -1,32 +1,44 @@
 # Core.psm1
 # Purpose: Core configuration and utility functions for InsightOps
 
-# Base paths - simplified to match actual structure
+# Base paths - corrected path resolution
 $script:PROJECT_ROOT = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$script:CONFIG_PATH = Join-Path $script:PROJECT_ROOT "Configurations"
+if (-not $script:PROJECT_ROOT) {
+    throw "Failed to resolve project root path"
+}
+
+$script:CONFIG_PATH = Join-Path -Path $script:PROJECT_ROOT -ChildPath "Configurations"
+if (-not $script:CONFIG_PATH) {
+    throw "Failed to resolve configuration path"
+}
+
+# Log path resolution for debugging
+Write-Verbose "PSScriptRoot: $PSScriptRoot"
+Write-Verbose "Project Root: $script:PROJECT_ROOT"
+Write-Verbose "Config Path: $script:CONFIG_PATH"
 
 # Environment Settings
 $script:NAMESPACE = "insightops"
 $script:DEFAULT_ENVIRONMENT = "Development"
 
-# Required paths - simplified to match actual structure
+# Required paths - with explicit path joining
 $script:REQUIRED_PATHS = @(
     $script:CONFIG_PATH,
-    (Join-Path $script:CONFIG_PATH "grafana"),
-    (Join-Path $script:CONFIG_PATH "init-scripts"),
-    (Join-Path $script:CONFIG_PATH "tempo"),
-    (Join-Path $script:CONFIG_PATH "loki"),
-    (Join-Path $script:CONFIG_PATH "prometheus")
+    (Join-Path -Path $script:CONFIG_PATH -ChildPath "grafana"),
+    (Join-Path -Path $script:CONFIG_PATH -ChildPath "init-scripts"),
+    (Join-Path -Path $script:CONFIG_PATH -ChildPath "tempo"),
+    (Join-Path -Path $script:CONFIG_PATH -ChildPath "loki"),
+    (Join-Path -Path $script:CONFIG_PATH -ChildPath "prometheus")
 )
 
-# Required configuration files with proper path joining
+# Required configuration files
 $script:REQUIRED_FILES = @{
-    "docker-compose.yml" = Join-Path $script:CONFIG_PATH "docker-compose.yml"
-    "tempo.yaml" = Join-Path $script:CONFIG_PATH "tempo.yaml"
-    "loki-config.yaml" = Join-Path $script:CONFIG_PATH "loki-config.yaml"
-    "prometheus.yml" = Join-Path $script:CONFIG_PATH "prometheus.yml"
-    ".env.development" = Join-Path $script:CONFIG_PATH ".env.development"
-    ".env.production" = Join-Path $script:CONFIG_PATH ".env.production"
+    "docker-compose.yml" = Join-Path -Path $script:CONFIG_PATH -ChildPath "docker-compose.yml"
+    "tempo.yaml" = Join-Path -Path $script:CONFIG_PATH -ChildPath "tempo.yaml"
+    "loki-config.yaml" = Join-Path -Path $script:CONFIG_PATH -ChildPath "loki-config.yaml"
+    "prometheus.yml" = Join-Path -Path $script:CONFIG_PATH -ChildPath "prometheus.yml"
+    ".env.development" = Join-Path -Path $script:CONFIG_PATH -ChildPath ".env.development"
+    ".env.production" = Join-Path -Path $script:CONFIG_PATH -ChildPath ".env.production"
 }
 
 # Service Configuration with health checks
@@ -685,7 +697,11 @@ Export-ModuleMember -Function @(
     'Test-Configuration',
     'Initialize-DefaultConfigurations',
     'Set-EnvironmentConfig',
-    'Test-ServiceHealth'
+    'Test-ServiceHealth',
+    'Get-PrometheusConfig',
+    'Get-LokiConfig',
+    'Get-TempoConfig',
+    'Get-DockerComposeConfig'
 ) -Variable @(
     'NAMESPACE',
     'SERVICES',

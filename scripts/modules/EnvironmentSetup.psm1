@@ -1,5 +1,20 @@
 # EnvironmentSetup.psm1
 # Purpose: Handles environment setup and configuration for InsightOps
+# Import required variables from Core module
+if (-not (Get-Module Core)) {
+    throw "Core module not loaded. Please ensure Core.psm1 is imported first."
+}
+
+# Import paths and settings from Core module
+$script:CONFIG_PATH = (Get-Variable -Name CONFIG_PATH -Scope Global).Value
+$script:REQUIRED_PATHS = (Get-Variable -Name REQUIRED_PATHS -Scope Global).Value
+$script:REQUIRED_FILES = (Get-Variable -Name REQUIRED_FILES -Scope Global).Value
+$script:NAMESPACE = (Get-Variable -Name NAMESPACE -Scope Global).Value
+
+# Verify required variables
+if (-not $script:CONFIG_PATH) {
+    throw "CONFIG_PATH not available from Core module"
+}
 
 function Write-Info { param([string]$Message) Write-Host $Message -ForegroundColor Cyan }
 function Write-Success { param([string]$Message) Write-Host $Message -ForegroundColor Green }
@@ -132,41 +147,322 @@ datasources:
 '@
 }
 
+function Get-PrometheusConfig {
+    return $script:CONFIG_TEMPLATES.Prometheus
+}
+
+function Get-LokiConfig {
+    return $script:CONFIG_TEMPLATES.Loki
+}
+
+function Get-TempoConfig {
+    return $script:CONFIG_TEMPLATES.Tempo
+}
+
+function Get-DockerComposeConfig {
+    return @'
+version: '3.8'
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-healthcheck: &default-healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
+services:
+  postgres:
+    image: postgres:13
+    container_name: ${NAMESPACE:-insightops}_db
+    environment:
+      POSTGRES_USER: ${DB_USER:-insightops_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-insightops_pwd}
+      POSTGRES_DB: ${DB_NAME:-insightops_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-insightops_user} -d ${DB_NAME:-insightops_db}"]
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ${NAMESPACE:-insightops}_grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-InsightOps2024!}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health"]
+    logging: *default-logging
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ${NAMESPACE:-insightops}_prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+    logging: *default-logging
+
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: ${NAMESPACE:-insightops}_loki
+    volumes:
+      - ./loki-config.yaml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    ports:
+      - "${LOKI_PORT:-3101}:3100"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready"]
+    logging: *default-logging
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: ${NAMESPACE:-insightops}_tempo
+    command: [ "-config.file=/etc/tempo/tempo.yaml" ]
+    volumes:
+      - ./tempo.yaml:/etc/tempo/tempo.yaml
+      - tempo_data:/tmp/tempo
+    ports:
+      - "${TEMPO_PORT:-4317}:4317"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+    name: ${NAMESPACE:-insightops}_postgres_data
+  grafana_data:
+    name: ${NAMESPACE:-insightops}_grafana_data
+  prometheus_data:
+    name: ${NAMESPACE:-insightops}_prometheus_data
+  loki_data:
+    name: ${NAMESPACE:-insightops}_loki_data
+  tempo_data:
+    name: ${NAMESPACE:-insightops}_tempo_data
+
+networks:
+  default:
+    name: ${NAMESPACE:-insightops}_network
+    driver: bridge
+'@
+}
+
 function Initialize-Environment {
     [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $false)]
-        [string]$Environment = $ENVIRONMENT,
-        
-        [Parameter(Mandatory = $false)]
+    param(
+        [string]$Environment = "Development",
         [switch]$Force
     )
     
     try {
-        Write-InfoMessage "Initializing $Environment environment..."
-        
+        Write-Host "`nInitializing environment: $Environment" -ForegroundColor Cyan
+        Write-Host "Using configuration path: $script:CONFIG_PATH" -ForegroundColor Yellow
+
         # Create required directories
-        foreach ($dir in $REQUIRED_PATHS.Directories) {
-            if (-not (Test-Path $dir) -or $Force) {
-                New-Item -ItemType Directory -Path $dir -Force | Out-Null
-                Write-InfoMessage "Created directory: $dir"
+        Write-Host "`nCreating required directories:" -ForegroundColor Yellow
+        foreach ($path in $script:REQUIRED_PATHS) {
+            if (-not (Test-Path $path)) {
+                New-Item -ItemType Directory -Path $path -Force | Out-Null
+                Write-Host "  [Created] $($path.Split('\')[-1])" -ForegroundColor Green
+            } else {
+                Write-Host "  [Exists] $($path.Split('\')[-1])" -ForegroundColor Cyan
             }
         }
+
+        # Set up main configuration files
+        Write-Host "`nSetting up configuration files:" -ForegroundColor Yellow
+        $configs = @{
+            "tempo/tempo.yaml" = Get-TempoConfig
+            "docker-compose.yml" = Get-DockerComposeConfig
+            "prometheus/prometheus.yml" = Get-PrometheusConfig
+            "loki/loki-config.yaml" = Get-LokiConfig
+        }
+
+        foreach ($config in $configs.GetEnumerator()) {
+            $filePath = Join-Path $script:CONFIG_PATH $config.Key
+            if ((-not (Test-Path $filePath)) -or $Force) {
+                # Ensure directory exists
+                $directory = Split-Path $filePath -Parent
+                if (-not (Test-Path $directory)) {
+                    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+                }
+                Set-Content -Path $filePath -Value $config.Value -Force
+                Write-Host "  [Created] $($config.Key)" -ForegroundColor Green
+            } else {
+                Write-Host "  [Exists] $($config.Key)" -ForegroundColor Cyan
+            }
+        }
+
+        # Set up Grafana configurations
+        Write-Host "`nSetting up Grafana configurations:" -ForegroundColor Yellow
         
-        # Create configuration files
-        Set-PrometheusConfig -Force:$Force
-        Set-LokiConfig -Force:$Force
-        Set-TempoConfig -Force:$Force
-        Set-GrafanaConfig -Force:$Force
-        
-        # Set environment-specific variables
-        Set-EnvironmentVariables -Environment $Environment
-        
-        Write-SuccessMessage "Environment initialization completed successfully"
+        # Create Grafana directory structure
+        $grafanaBasePath = Join-Path $script:CONFIG_PATH "grafana"
+        $grafanaDashboardsPath = Join-Path $grafanaBasePath "provisioning\dashboards"
+        $grafanaDatasourcesPath = Join-Path $grafanaBasePath "provisioning\datasources"
+
+        # Ensure directories exist
+        @($grafanaDashboardsPath, $grafanaDatasourcesPath) | ForEach-Object {
+            if (-not (Test-Path $_)) {
+                New-Item -ItemType Directory -Path $_ -Force | Out-Null
+                Write-Host "  [Created] directory: $($_.Split('\')[-2..-1] -join '/')" -ForegroundColor Green
+            }
+        }
+
+        # Create dashboard configuration
+        $dashboardFile = Join-Path $grafanaDashboardsPath "dashboard.yml"
+        if ((-not (Test-Path $dashboardFile)) -or $Force) {
+            Set-Content -Path $dashboardFile -Value $script:CONFIG_TEMPLATES.GrafanaDashboard -Force
+            Write-Host "  [Created] grafana/provisioning/dashboards/dashboard.yml" -ForegroundColor Green
+        } else {
+            Write-Host "  [Exists] grafana/provisioning/dashboards/dashboard.yml" -ForegroundColor Cyan
+        }
+
+        # Create datasource configuration
+        $datasourceFile = Join-Path $grafanaDatasourcesPath "datasources.yaml"
+        if ((-not (Test-Path $datasourceFile)) -or $Force) {
+            Set-Content -Path $datasourceFile -Value $script:CONFIG_TEMPLATES.GrafanaDatasource -Force
+            Write-Host "  [Created] grafana/provisioning/datasources/datasources.yaml" -ForegroundColor Green
+        } else {
+            Write-Host "  [Exists] grafana/provisioning/datasources/datasources.yaml" -ForegroundColor Cyan
+        }
+
+        # Create environment files
+        Write-Host "`nSetting up environment files:" -ForegroundColor Yellow
+        if (Set-EnvironmentConfig -Environment $Environment -Force:$Force) {
+            Write-Host "  [OK] Created .env.$Environment" -ForegroundColor Green
+        }
+
+        Write-Host "`nEnvironment initialization completed" -ForegroundColor Green
         return $true
     }
     catch {
-        Write-ErrorMessage ("Failed to initialize environment: {0}" -f $_)
+        Write-Host "`nEnvironment initialization failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+        return $false
+    }
+}
+
+function __Initialize-Environment {
+    [CmdletBinding()]
+    param(
+        [string]$Environment = "Development",
+        [switch]$Force
+    )
+    
+    try {
+        Write-Host "`nInitializing environment: $Environment" -ForegroundColor Cyan
+        Write-Host "Using configuration path: $script:CONFIG_PATH" -ForegroundColor Yellow
+
+        # Create required directories
+        Write-Host "`nCreating required directories:" -ForegroundColor Yellow
+        foreach ($path in $script:REQUIRED_PATHS) {
+            if (-not (Test-Path $path)) {
+                New-Item -ItemType Directory -Path $path -Force | Out-Null
+                Write-Host "  [Created] $($path.Split('\')[-1])" -ForegroundColor Green
+            } else {
+                Write-Host "  [Exists] $($path.Split('\')[-1])" -ForegroundColor Cyan
+            }
+        }
+
+        # Create configuration files
+        Write-Host "`nSetting up configuration files:" -ForegroundColor Yellow
+        $templates = @{
+            "prometheus.yml" = Get-PrometheusConfig
+            "loki-config.yaml" = Get-LokiConfig
+            "tempo.yaml" = Get-TempoConfig
+            "docker-compose.yml" = Get-DockerComposeConfig
+        }
+
+        foreach ($template in $templates.GetEnumerator()) {
+            $filePath = Join-Path $script:CONFIG_PATH $template.Key
+            if ((-not (Test-Path $filePath)) -or $Force) {
+                $template.Value | Set-Content -Path $filePath -Force
+                Write-Host "  [Created] $($template.Key)" -ForegroundColor Green
+            } else {
+                Write-Host "  [Exists] $($template.Key)" -ForegroundColor Cyan
+            }
+        }
+
+        # Create environment files
+        Write-Host "`nSetting up environment files:" -ForegroundColor Yellow
+        if (Set-EnvironmentConfig -Environment $Environment -Force:$Force) {
+            Write-Host "  [OK] Created .env.$Environment" -ForegroundColor Green
+        }
+
+        Write-Host "`nEnvironment initialization completed" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Host "`nEnvironment initialization failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+        return $false
+    }
+}
+
+function Set-EnvironmentConfig {
+    [CmdletBinding()]
+    param(
+        [string]$Environment,
+        [switch]$Force
+    )
+    
+    try {
+        $envFile = Join-Path $script:CONFIG_PATH ".env.$Environment"
+        
+        # Basic environment variables
+        $envVars = @{
+            NAMESPACE = $script:NAMESPACE
+            ENVIRONMENT = $Environment
+            ASPNETCORE_ENVIRONMENT = $Environment
+            GRAFANA_USER = "admin"
+            GRAFANA_PASSWORD = "InsightOps2024!"
+            DB_USER = "insightops_user"
+            DB_PASSWORD = "insightops_pwd"
+            DB_NAME = "insightops_db"
+            DB_PORT = if ($Environment -eq "Development") { "5433" } else { "5432" }
+            FRONTEND_PORT = if ($Environment -eq "Development") { "5010" } else { "80" }
+            GATEWAY_PORT = if ($Environment -eq "Development") { "5011" } else { "8080" }
+            ORDER_PORT = if ($Environment -eq "Development") { "5012" } else { "8081" }
+            INVENTORY_PORT = if ($Environment -eq "Development") { "5013" } else { "8082" }
+            GRAFANA_PORT = if ($Environment -eq "Development") { "3001" } else { "3000" }
+            PROMETHEUS_PORT = if ($Environment -eq "Development") { "9091" } else { "9090" }
+            LOKI_PORT = if ($Environment -eq "Development") { "3101" } else { "3100" }
+            TEMPO_PORT = "4317"
+            METRICS_RETENTION = "30d"
+        }
+
+        # Create environment file content
+        $envContent = $envVars.GetEnumerator() | ForEach-Object {
+            "$($_.Key)=$($_.Value)"
+        }
+
+        # Write to file
+        Set-Content -Path $envFile -Value $envContent -Force
+        return $true
+    }
+    catch {
+        Write-Host "Failed to set environment configuration: $_" -ForegroundColor Red
         return $false
     }
 }
@@ -386,10 +682,14 @@ function Set-GrafanaConfig {
         }
     }
 
-    # Export module members
-    Export-ModuleMember -Function @(
-        'Initialize-Environment',
-        'Set-EnvironmentVariables',
-        'Set-SSLCertificates',
-        'Backup-Environment'
-    )
+# Export module members
+Export-ModuleMember -Function @(
+    'Initialize-Environment',
+    'Set-EnvironmentConfig',
+    'Set-SSLCertificates',
+    'Backup-Environment',
+    'Get-PrometheusConfig',
+    'Get-LokiConfig',
+    'Get-TempoConfig',
+    'Get-DockerComposeConfig'
+)

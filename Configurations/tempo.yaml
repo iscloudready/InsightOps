@@ -3,29 +3,21 @@ server:
 
 distributor:
   receivers:
+    jaeger:
+      protocols:
+        thrift_http:
+          endpoint: 0.0.0.0:14268
+        grpc:
+          endpoint: 0.0.0.0:14250
     otlp:
       protocols:
-        grpc:
-          endpoint: "0.0.0.0:4317"
         http:
-          endpoint: "0.0.0.0:4318"
+          endpoint: 0.0.0.0:4318
+        grpc:
+          endpoint: 0.0.0.0:4317
 
 storage:
   trace:
     backend: local
     local:
       path: /tmp/tempo/blocks
-    wal:
-      path: /tmp/tempo/wal
-
-ingester:
-  max_block_duration: 5m
-  trace_idle_period: "10s"
-  flush_check_period: "1m"
-
-compactor:
-  compaction:
-    block_retention: "24h"  # Fixed value instead of env var
-  ring:
-    kvstore:
-      store: memberlist
