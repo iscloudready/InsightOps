@@ -11,8 +11,8 @@ function Test-Prerequisites {
     param()
     
     try {
-        # Check Docker is running
-        $dockerStatus = docker info 2>&1
+        # Check if Docker daemon is accessible
+        $dockerPs = docker ps 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Docker is not running" -ForegroundColor Red
             return $false
@@ -32,6 +32,8 @@ function Test-Prerequisites {
             }
         }
 
+        # All checks passed
+        Write-Host "Prerequisites check passed" -ForegroundColor Green
         return $true
     }
     catch {
@@ -391,10 +393,17 @@ function Invoke-MenuChoice {
 
             # Core Service Operations
             "6" { 
+                Write-Host "`nChecking prerequisites..." -ForegroundColor Cyan
                 if (-not (Test-Prerequisites)) {
-                    Write-Host "Prerequisites not met. Please run option 1 first." -ForegroundColor Red
+                    Write-Host "`nPrerequisites not met. Please:" -ForegroundColor Yellow
+                    Write-Host "1. Run Option 1 (Check Prerequisites)" -ForegroundColor Yellow
+                    Write-Host "2. Run Option 2 (Initialize Environment)" -ForegroundColor Yellow
+                    Write-Host "3. Run Option 3 (Test Configuration)" -ForegroundColor Yellow
+                    Write-Host "Then try starting services again." -ForegroundColor Yellow
                     return $true
                 }
+
+                Write-Host "`nStarting services..." -ForegroundColor Cyan
                 Start-DockerServices 
             }
             "7" { Stop-DockerServices }

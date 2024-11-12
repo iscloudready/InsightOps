@@ -351,45 +351,6 @@ function Set-EnvironmentConfig {
     }
 }
 
-function Test-ServiceHealth {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $false)]
-        [string]$ServiceName
-    )
-    
-    try {
-        $servicesToCheck = if ($ServiceName) {
-            @($script:SERVICES[$ServiceName])
-        } else {
-            $script:SERVICES.Values
-        }
-
-        foreach ($service in $servicesToCheck) {
-            $container = $service.Container
-            $status = docker inspect --format='{{.State.Health.Status}}' $container 2>$null
-            
-            if ($status) {
-                Write-Host "$($service.Name): $status" -ForegroundColor $(
-                    switch ($status) {
-                        "healthy" { "Green" }
-                        "unhealthy" { "Red" }
-                        default { "Yellow" }
-                    }
-                )
-            } else {
-                Write-Host "$($service.Name): container not found" -ForegroundColor Red
-            }
-        }
-        
-        return $true
-    }
-    catch {
-        Write-Host "Health check failed: $_" -ForegroundColor Red
-        return $false
-    }
-}
-
 function Get-PrometheusConfig {
     return @'
 global:
@@ -697,7 +658,6 @@ Export-ModuleMember -Function @(
     'Test-Configuration',
     'Initialize-DefaultConfigurations',
     'Set-EnvironmentConfig',
-    'Test-ServiceHealth',
     'Get-PrometheusConfig',
     'Get-LokiConfig',
     'Get-TempoConfig',

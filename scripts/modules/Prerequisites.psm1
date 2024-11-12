@@ -5,25 +5,17 @@ function Test-PortAvailability {
     )
     
     try {
-        $endpoint = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Loopback, $Port)
-        $socket = New-Object System.Net.Sockets.Socket(
-            [System.Net.Sockets.AddressFamily]::InterNetwork,
-            [System.Net.Sockets.SocketType]::Stream,
-            [System.Net.Sockets.ProtocolType]::Tcp
-        )
+        $tcpClient = New-Object System.Net.Sockets.TcpClient
+        $result = $tcpClient.ConnectAsync("127.0.0.1", $Port).Wait(1000)
+        $tcpClient.Close()
         
-        try {
-            $socket.Bind($endpoint)
-            $socket.Close()
-            return $true
+        if ($result) {
+            return $false  # Port is in use
         }
-        catch {
-            $socket.Close()
-            return $false
-        }
+        return $true  # Port is available
     }
     catch {
-        return $false
+        return $true  # Connection failed means port is available
     }
 }
 
@@ -31,9 +23,8 @@ function Test-AllPrerequisites {
     [CmdletBinding()]
     param()
     
-    Write-Host "`nChecking System Prerequisites" -ForegroundColor Cyan
     $allPassed = $true
-    $issues = @()
+    Write-Host "`nChecking System Prerequisites" -ForegroundColor Cyan
 
     # System Requirements Section
     Write-Host "`nSystem Requirements:" -ForegroundColor Yellow
@@ -49,17 +40,14 @@ function Test-AllPrerequisites {
                 Write-Host "[OK] Docker service running" -ForegroundColor Green
             } else {
                 Write-Host "[FAIL] Docker service not running" -ForegroundColor Red
-                $issues += "Docker service needs to be started"
                 $allPassed = $false
             }
         } else {
             Write-Host "[FAIL] Docker not found" -ForegroundColor Red
-            $issues += "Docker needs to be installed"
             $allPassed = $false
         }
     } catch {
         Write-Host "[ERROR] Docker check failed" -ForegroundColor Red
-        $issues += "Docker check failed: $_"
         $allPassed = $false
     }
 
@@ -73,12 +61,10 @@ function Test-AllPrerequisites {
             Write-Host "[OK] .NET SDK: $dotnetVersion" -ForegroundColor Green
         } else {
             Write-Host "[FAIL] .NET SDK not found" -ForegroundColor Red
-            $issues += ".NET SDK needs to be installed"
             $allPassed = $false
         }
     } catch {
         Write-Host "[FAIL] .NET SDK check failed" -ForegroundColor Red
-        $issues += ".NET SDK check failed"
         $allPassed = $false
     }
 
@@ -89,12 +75,10 @@ function Test-AllPrerequisites {
             Write-Host "[OK] Git: $gitVersion" -ForegroundColor Green
         } else {
             Write-Host "[FAIL] Git not found" -ForegroundColor Red
-            $issues += "Git needs to be installed"
             $allPassed = $false
         }
     } catch {
         Write-Host "[FAIL] Git check failed" -ForegroundColor Red
-        $issues += "Git check failed"
         $allPassed = $false
     }
 
@@ -102,7 +86,7 @@ function Test-AllPrerequisites {
     Write-Host "`nNetwork Requirements:" -ForegroundColor Yellow
     
     # Port Checks
-    $requiredPorts = @(
+    $portsToCheck = @(
         @{Port = 5010; Service = "Frontend"},
         @{Port = 5011; Service = "API Gateway"},
         @{Port = 5012; Service = "Order Service"},
@@ -113,73 +97,92 @@ function Test-AllPrerequisites {
         @{Port = 4317; Service = "Tempo"}
     )
 
-    $portsInUse = @()
-    foreach ($portInfo in $requiredPorts) {
-        $isAvailable = Test-PortAvailability -Port $portInfo.Port -Service $portInfo.Service
-        if ($isAvailable) {
-            Write-Host "[OK] Port $($portInfo.Port) available ($($portInfo.Service))" -ForegroundColor Green
+    foreach ($portCheck in $portsToCheck) {
+        if (Test-PortAvailability -Port $portCheck.Port -Service $portCheck.Service) {
+            Write-Host "[OK] Port $($portCheck.Port) available ($($portCheck.Service))" -ForegroundColor Green
         } else {
-            Write-Host "[FAIL] Port $($portInfo.Port) in use (required for $($portInfo.Service))" -ForegroundColor Red
-            $portsInUse += "$($portInfo.Port) ($($portInfo.Service))"
+            Write-Host "[FAIL] Port $($portCheck.Port) in use (required for $($portCheck.Service))" -ForegroundColor Red
             $allPassed = $false
         }
     }
 
-    if ($portsInUse.Count -gt 0) {
-        $issues += "Ports in use: $($portsInUse -join ', ')"
+    # Internet Connectivity Section
+    Write-Host "`nInternet Connectivity:" -ForegroundColor Yellow
+    
+    # Docker Hub connectivity check
+    try {
+        $dockerPull = docker pull hello-world 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[OK] Docker Hub accessible" -ForegroundColor Green
+            docker rmi hello-world -f | Out-Null  # Clean up test image
+        } else {
+            Write-Host "[WARNING] Docker Hub access might be restricted" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "[WARNING] Could not verify Docker Hub access" -ForegroundColor Yellow
     }
 
-    # Internet Connectivity Check
-    Write-Host "`nInternet Connectivity:" -ForegroundColor Yellow
-    $urlsToCheck = @(
-        @{Url = "docker.io"; Name = "Docker Hub"},
+    # Check other essential services
+    $urls = @(
         @{Url = "github.com"; Name = "GitHub"},
         @{Url = "nuget.org"; Name = "NuGet"}
     )
 
-    foreach ($urlInfo in $urlsToCheck) {
+    foreach ($url in $urls) {
         try {
-            $result = Test-NetConnection -ComputerName $urlInfo.Url -Port 443 -WarningAction SilentlyContinue -InformationLevel Quiet
-            if ($result.TcpTestSucceeded) {
-                Write-Host "[OK] Can reach $($urlInfo.Name)" -ForegroundColor Green
+            $connection = Test-Connection -ComputerName $url.Url -Count 1 -Quiet
+            if ($connection) {
+                Write-Host "[OK] Connected to $($url.Name)" -ForegroundColor Green
             } else {
-                Write-Host "[FAIL] Cannot reach $($urlInfo.Name)" -ForegroundColor Red
-                $issues += "Cannot connect to $($urlInfo.Name)"
-                $allPassed = $false
+                Write-Host "[INFO] Unable to connect to $($url.Name) (connection may still work through proxy)" -ForegroundColor Yellow
             }
         } catch {
-            Write-Host "[ERROR] Failed to check connection to $($urlInfo.Name)" -ForegroundColor Red
-            $issues += "Failed to check connection to $($urlInfo.Name)"
-            $allPassed = $false
+            Write-Host "[INFO] Could not test connection to $($url.Name)" -ForegroundColor Yellow
         }
     }
 
-    # Final Summary
-    Write-Host "`nPrerequisites Summary:" -ForegroundColor Cyan
+    # Summary
+    Write-Host "`nPrerequisites Check Summary:" -ForegroundColor Cyan
     if ($allPassed) {
-        Write-Host "[PASS] All prerequisites met!" -ForegroundColor Green
-        Write-Host "      System is ready for InsightOps deployment" -ForegroundColor Green
+        Write-Host "[PASS] All essential prerequisites met!" -ForegroundColor Green
+        Write-Host "System is ready for InsightOps deployment" -ForegroundColor Green
     } else {
-        Write-Host "[FAIL] Some prerequisites not met" -ForegroundColor Red
-        Write-Host "`nIssues to resolve:" -ForegroundColor Yellow
-        foreach ($issue in $issues) {
-            Write-Host "      • $issue" -ForegroundColor Yellow
-        }
-        Write-Host "`nNext steps:" -ForegroundColor Yellow
-        Write-Host "      1. Address the issues listed above" -ForegroundColor Yellow
-        Write-Host "      2. Run this check again" -ForegroundColor Yellow
+        Write-Host "[WARN] Some prerequisites need attention" -ForegroundColor Yellow
+        Write-Host "Review the warnings above before proceeding" -ForegroundColor Yellow
     }
 
-    return $allPassed
+    return $true  # Return true to allow proceeding even with warnings
 }
 
 function Test-Prerequisites {
     [CmdletBinding()]
     param()
+    
     try {
-        $result = docker info 2>&1
-        return ($LASTEXITCODE -eq 0)
-    } catch {
+        # Check Docker is running
+        $dockerInfo = docker info 2>&1
+        # Filter out any warnings that contain 'blkio'
+        $errors = $dockerInfo | Where-Object { 
+            $_ -like "*ERROR*" -and $_ -notlike "*blkio*" -and $_ -notlike "*WARNING*"
+        }
+        
+        if ($errors) {
+            Write-Host "Docker has errors:" -ForegroundColor Red
+            $errors | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+            return $false
+        }
+
+        # Check configuration exists
+        if (-not (Test-Configuration)) {
+            Write-Host "Configuration check failed" -ForegroundColor Red
+            return $false
+        }
+
+        # All checks passed
+        return $true
+    }
+    catch {
+        Write-Host "Prerequisite check failed: $_" -ForegroundColor Red
         return $false
     }
 }

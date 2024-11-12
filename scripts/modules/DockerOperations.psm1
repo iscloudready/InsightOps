@@ -1,6 +1,5 @@
 # DockerOperations.psm1
 # Purpose: Docker operations management
-# Add this at the beginning of DockerOperations.psm1
 $script:CONFIG_ROOT = Join-Path (Split-Path -Parent $PSScriptRoot) "Configurations"
 $script:DOCKER_COMPOSE_PATH = Join-Path $script:CONFIG_ROOT "docker-compose.yml"
 
@@ -78,6 +77,75 @@ function Show-DockerStatus {
     }
 }
 
+function Test-ServiceHealth {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$ServiceName
+    )
+    
+    try {
+        Write-Host "`nChecking service health..." -ForegroundColor Cyan
+        
+        # Get all containers status
+        $runningContainers = docker ps --format "{{.Names}}" 2>$null
+        $allContainers = docker ps -a --format "{{.Names}}|{{.Status}}" 2>$null
+
+        $services = @{
+            "insightops_db" = "Database"
+            "insightops_frontend" = "Frontend"
+            "insightops_gateway" = "API Gateway"
+            "insightops_orders" = "Order Service"
+            "insightops_inventory" = "Inventory Service"
+            "insightops_tempo" = "Tempo"
+            "insightops_grafana" = "Grafana"
+            "insightops_loki" = "Loki"
+            "insightops_prometheus" = "Prometheus"
+        }
+
+        foreach ($container in $services.Keys) {
+            $serviceName = $services[$container]
+            $containerStatus = $allContainers | Where-Object { $_ -like "$container|*" }
+            
+            if ($containerStatus) {
+                $status = $containerStatus.Split('|')[1]
+                if ($status -like "Up*") {
+                    $health = docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}running{{end}}' $container 2>$null
+                    Write-Host "  • $serviceName : $health" -ForegroundColor $(
+                        switch ($health) {
+                            "healthy" { "Green" }
+                            "unhealthy" { "Red" }
+                            "running" { "Green" }
+                            default { "Yellow" }
+                        }
+                    )
+                }
+                elseif ($status -like "Exited*") {
+                    $exitInfo = docker inspect --format='{{.State.ExitCode}}' $container 2>$null
+                    Write-Host "  • $serviceName : Exited (code: $exitInfo)" -ForegroundColor Red
+                }
+                else {
+                    Write-Host "  • $serviceName : $status" -ForegroundColor Yellow
+                }
+            }
+            else {
+                Write-Host "  • $serviceName : not found" -ForegroundColor Red
+            }
+        }
+
+        Write-Host "`nTroubleshooting Tips:" -ForegroundColor Yellow
+        Write-Host "  1. View service logs: Option 15" -ForegroundColor Yellow
+        Write-Host "  2. Check container details: Option 11" -ForegroundColor Yellow
+        Write-Host "  3. Restart services if needed: Option 8" -ForegroundColor Yellow
+        
+        return $true
+    }
+    catch {
+        Write-Host "Health check failed: $_" -ForegroundColor Red
+        return $false
+    }
+}
+
 # Define common logging functions to match Logging module
 function Write-Information { param([string]$Message) Write-Host $Message -ForegroundColor Cyan }
 function Write-Success { param([string]$Message) Write-Host $Message -ForegroundColor Green }
@@ -89,45 +157,48 @@ function Start-DockerServices {
     param()
     
     try {
-        $composeArgs = "up", "-d"
-        $composePath = Join-Path $script:CONFIG_ROOT "docker-compose.yml"
-        docker-compose -f $composePath $composeArgs
-        Write-Success "Docker services started successfully"
-    }
-    catch {
-        Write-Error "Failed to start Docker services: $_"
-    }
-}
+        Write-Host "`nStarting Docker services..." -ForegroundColor Cyan
 
-function _Start-DockerServices {
-    [CmdletBinding()]
-    param (
-        [string[]]$Services,
-        [switch]$Build
-    )
-    
-    try {
-        Write-Information "Starting Docker services..."
-        $composeArgs = @('up', '-d')
-        
-        if ($Build) {
-            $composeArgs += '--build'
+        # Use DOCKER_COMPOSE_PATH instead of CONFIG_PATH
+        if (-not (Test-Path $script:DOCKER_COMPOSE_PATH)) {
+            throw "Docker Compose file not found at: $script:DOCKER_COMPOSE_PATH"
+        }
+
+        Write-Host "Using compose file: $script:DOCKER_COMPOSE_PATH" -ForegroundColor Yellow
+
+        # Change to the configuration directory
+        $configDir = Split-Path $script:DOCKER_COMPOSE_PATH -Parent
+        $currentLocation = Get-Location
+        Set-Location $configDir
+
+        try {
+            # Start the services
+            Write-Host "Starting containers..." -ForegroundColor Yellow
+            docker-compose -f $script:DOCKER_COMPOSE_PATH up -d
+
+            # Show status
+            Write-Host "`nContainer Status:" -ForegroundColor Cyan
+            docker-compose -f $script:DOCKER_COMPOSE_PATH ps
+
+            Write-Host "`nServices started successfully" -ForegroundColor Green
+            Write-Host "Use Option 10 to check service health" -ForegroundColor Yellow
+            Write-Host "Use Option 20 to open service URLs" -ForegroundColor Yellow
+        }
+        finally {
+            # Restore original location
+            Set-Location $currentLocation
         }
         
-        if ($Services) {
-            $composeArgs += $Services
-        }
-        
-        docker-compose $composeArgs
-        Write-Success "Docker services started successfully"
         return $true
     }
     catch {
-        Write-Error "Failed to start Docker services: $_"
+        Write-Host "Failed to start services: $_" -ForegroundColor Red
+        Write-Host "Location: $(Get-Location)" -ForegroundColor Yellow  # Debug info
         return $false
     }
 }
 
+# Also update Stop-DockerServices to use the correct path
 function Stop-DockerServices {
     [CmdletBinding()]
     param (
@@ -136,14 +207,28 @@ function Stop-DockerServices {
     
     try {
         Write-Information "Stopping Docker services..."
-        $composePath = Join-Path $script:CONFIG_ROOT "docker-compose.yml"
-        if ($RemoveVolumes) {
-            docker-compose -f $composePath down -v --remove-orphans
+        
+        if (-not (Test-Path $script:DOCKER_COMPOSE_PATH)) {
+            throw "Docker Compose configuration not found at: $script:DOCKER_COMPOSE_PATH"
         }
-        else {
-            docker-compose -f $composePath down --remove-orphans
+
+        $configDir = Split-Path $script:DOCKER_COMPOSE_PATH -Parent
+        $currentLocation = Get-Location
+        Set-Location $configDir
+
+        try {
+            if ($RemoveVolumes) {
+                docker-compose -f $script:DOCKER_COMPOSE_PATH down -v --remove-orphans
+            }
+            else {
+                docker-compose -f $script:DOCKER_COMPOSE_PATH down --remove-orphans
+            }
+            Write-Success "Docker services stopped successfully"
         }
-        Write-Success "Docker services stopped successfully"
+        finally {
+            Set-Location $currentLocation
+        }
+        
         return $true
     }
     catch {
@@ -171,35 +256,54 @@ function Restart-DockerService {
     }
 }
 
-function Export-DockerLogs {
-    [CmdletBinding()]
+function Get-ContainerLogs {
     param (
-        [string]$ServiceName,
-        [string]$OutputPath = "logs"
+        [Parameter(Mandatory = $true)]
+        [string]$ContainerName
     )
     
     try {
-        if (-not (Test-Path $OutputPath)) {
-            New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
+        $containerExists = docker ps -a --format "{{.Names}}" | Where-Object { $_ -eq $ContainerName }
+        if (-not $containerExists) {
+            Write-Host "Container $ContainerName not found" -ForegroundColor Red
+            return $false
         }
 
-        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-        if ($ServiceName) {
-            $logFile = Join-Path $OutputPath "${ServiceName}_${timestamp}.log"
-            Write-Information "Exporting logs for $ServiceName to $logFile"
-            docker-compose logs $ServiceName > $logFile
-        }
-        else {
-            $logFile = Join-Path $OutputPath "all_services_${timestamp}.log"
-            Write-Information "Exporting logs for all services to $logFile"
-            docker-compose logs > $logFile
-        }
-
-        Write-Success "Logs exported successfully"
+        Write-Host "`nLogs for container $ContainerName" -ForegroundColor Cyan
+        Write-Host "-----------------------------------------" -ForegroundColor Gray
+        docker logs $ContainerName 2>&1
+        Write-Host "-----------------------------------------" -ForegroundColor Gray
+        
         return $true
     }
     catch {
-        Write-Error "Failed to export Docker logs: $_"
+        Write-Host "Failed to get logs: $_" -ForegroundColor Red
+        return $false
+    }
+}
+
+function Export-DockerLogs {
+    [CmdletBinding()]
+    param (
+        [string]$ServiceName
+    )
+    
+    try {
+        if ($ServiceName) {
+            Get-ContainerLogs -ContainerName $ServiceName
+        }
+        else {
+            Write-Host "`nGetting logs for all services..." -ForegroundColor Cyan
+            
+            $containers = docker ps -a --format "{{.Names}}"
+            foreach ($container in $containers) {
+                Get-ContainerLogs -ContainerName $container
+            }
+        }
+        return $true
+    }
+    catch {
+        Write-Host "Failed to get logs: $_" -ForegroundColor Red
         return $false
     }
 }
@@ -328,8 +432,11 @@ Export-ModuleMember -Function @(
     'Stop-DockerServices',
     'Restart-DockerService',
     'Export-DockerLogs',
+    'Get-ContainerLogs',
     'Wait-ServiceHealth',
     'Clean-DockerEnvironment',
 	'Test-ContainerHealth',
-	'Initialize-DockerEnvironment'
+	'Initialize-DockerEnvironment',
+    'Test-ContainerHealth',
+    'Test-ServiceHealth' 
 )

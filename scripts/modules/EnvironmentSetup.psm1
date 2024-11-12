@@ -161,7 +161,10 @@ function Get-TempoConfig {
 
 function Get-DockerComposeConfig {
     return @'
-version: '3.8'
+# Remove version as it's now obsolete
+# version: '3.8'  # This line is removed
+
+name: insightops  # Add this for explicit naming
 
 x-logging: &default-logging
   driver: "json-file"
@@ -212,7 +215,7 @@ services:
     image: prom/prometheus:latest
     container_name: ${NAMESPACE:-insightops}_prometheus
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     ports:
       - "${PROMETHEUS_PORT:-9091}:9090"
@@ -225,7 +228,7 @@ services:
     image: grafana/loki:2.9.3
     container_name: ${NAMESPACE:-insightops}_loki
     volumes:
-      - ./loki-config.yaml:/etc/loki/local-config.yaml
+      - ./loki/loki-config.yaml:/etc/loki/local-config.yaml
       - loki_data:/loki
     ports:
       - "${LOKI_PORT:-3101}:3100"
@@ -239,13 +242,17 @@ services:
     container_name: ${NAMESPACE:-insightops}_tempo
     command: [ "-config.file=/etc/tempo/tempo.yaml" ]
     volumes:
-      - ./tempo.yaml:/etc/tempo/tempo.yaml
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml
       - tempo_data:/tmp/tempo
     ports:
       - "${TEMPO_PORT:-4317}:4317"
+      - "${TEMPO_PORT_HTTP:-4318}:4318"
+      - "3200:3200"
+      - "9411:9411"
     healthcheck:
       <<: *default-healthcheck
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
+      start_period: 45s
     logging: *default-logging
 
 volumes:
