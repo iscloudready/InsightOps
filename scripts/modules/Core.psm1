@@ -437,6 +437,7 @@ function Get-TempoConfig {
     return @'
 server:
   http_listen_port: 3200
+  grpc_listen_port: 9096
 
 distributor:
   receivers:
@@ -450,8 +451,14 @@ distributor:
 storage:
   trace:
     backend: local
+    wal:
+      path: /tmp/tempo/wal
     local:
       path: /tmp/tempo/blocks
+
+compactor:
+  compaction:
+    block_retention: 24h
 '@
 }
 
@@ -517,7 +524,7 @@ services:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
     logging: *default-logging
 
-loki:
+  loki:
     container_name: ${NAMESPACE:-insightops}_loki
     volumes:
       - ./loki-config.yaml:/etc/loki/local-config.yaml
@@ -529,16 +536,18 @@ loki:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready"]
     logging: *default-logging
 
-  tempo:
+tempo:
     image: grafana/tempo:latest
     container_name: ${NAMESPACE:-insightops}_tempo
-    command: [ "-config.file=/etc/tempo/tempo.yaml" ]
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    environment:
+      - TEMPO_LOG_LEVEL=debug
     volumes:
-      - ./tempo.yaml:/etc/tempo/tempo.yaml
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro  # Fixed path
       - tempo_data:/tmp/tempo
     ports:
       - "${TEMPO_PORT:-4317}:4317"
-      - "${TEMPO_PORT_HTTP:-4318}:4318"
+      - "${TEMPO_HTTP_PORT:-4318}:4318"
       - "3200:3200"
       - "9411:9411"
     healthcheck:

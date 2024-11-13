@@ -77,15 +77,17 @@ services:
   tempo:
     image: grafana/tempo:latest
     container_name: ${NAMESPACE:-insightops}_tempo
-    command: [ "-config.file=/etc/tempo/tempo.yaml" ]
+    command: ["-config.file=/etc/tempo.yaml"]  # Ensure the correct path
+    environment:
+      - TEMPO_LOG_LEVEL=debug  # Set log level to debug to get more insights during troubleshooting
     volumes:
-      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml
-      - tempo_data:/tmp/tempo
+      - ./Configurations/tempo.yaml:/etc/tempo.yaml:ro  # Double-check path and set to read-only
+      - tempo_data:/tmp/tempo  # Ensure /tmp/tempo directory is writable
     ports:
-      - "${TEMPO_PORT:-4317}:4317"
-      - "${TEMPO_PORT_HTTP:-4318}:4318"
-      - "3200:3200"
-      - "9411:9411"
+      - "${TEMPO_GRPC_PORT:-4317}:4317"
+      - "${TEMPO_HTTP_PORT:-4318}:4318"
+      - "3200:3200"  # Tempo HTTP listening port for metrics and API
+      - "9411:9411"  # Zipkin compatibility port, if needed
     healthcheck:
       <<: *default-healthcheck
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
