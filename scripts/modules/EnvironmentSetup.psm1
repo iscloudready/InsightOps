@@ -1,5 +1,6 @@
 # EnvironmentSetup.psm1
 # Purpose: Handles environment setup and configuration for InsightOps
+
 # Import required variables from Core module
 if (-not (Get-Module Core)) {
     throw "Core module not loaded. Please ensure Core.psm1 is imported first."
@@ -87,24 +88,35 @@ server:
 
 distributor:
   receivers:
-    jaeger:
-      protocols:
-        thrift_http:
-          endpoint: 0.0.0.0:14268
-        grpc:
-          endpoint: 0.0.0.0:14250
     otlp:
       protocols:
-        http:
-          endpoint: 0.0.0.0:4318
         grpc:
-          endpoint: 0.0.0.0:4317
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
 
 storage:
   trace:
     backend: local
+    wal:
+      path: /tmp/tempo/wal
     local:
       path: /tmp/tempo/blocks
+
+ingester:
+  max_block_duration: "5m"
+  trace_idle_period: "10s"
+
+compactor:
+  compaction:
+    block_retention: 48h
+
+metrics_generator:
+  storage:
+    path: /tmp/tempo/generator/wal
+
+usage_report:
+  reporting_enabled: false
 '@
 
     GrafanaDashboard = @'
@@ -147,24 +159,41 @@ datasources:
 '@
 }
 
-function Get-PrometheusConfig {
-    return $script:CONFIG_TEMPLATES.Prometheus
-}
-
-function Get-LokiConfig {
-    return $script:CONFIG_TEMPLATES.Loki
-}
-
-function Get-TempoConfig {
-    return $script:CONFIG_TEMPLATES.Tempo
+# Configuration writing functions
+function Write-TempoConfig {
+    [CmdletBinding()]
+    param (
+        [string]$Path
+    )
+    
+    try {
+        $tempoConfig = $script:CONFIG_TEMPLATES.Tempo.Trim()
+        
+        # Ensure proper line endings
+        $tempoConfig = $tempoConfig -replace "`r`n", "`n" -replace "`r", "`n" -replace "`n", [Environment]::NewLine
+        
+        # Create directory if it doesn't exist
+        $directory = Split-Path -Parent $Path
+        if (-not (Test-Path $directory)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+        
+        # Write the file with UTF8 encoding without BOM
+        $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($Path, $tempoConfig, $utf8NoBomEncoding)
+        
+        Write-Verbose "Tempo configuration written to: $Path"
+        return $true
+    }
+    catch {
+        Write-Error "Failed to write Tempo configuration: $_"
+        return $false
+    }
 }
 
 function Get-DockerComposeConfig {
     return @'
-# Remove version as it's now obsolete
-# version: '3.8'  # This line is removed
-
-name: insightops  # Add this for explicit naming
+name: insightops
 
 x-logging: &default-logging
   driver: "json-file"
@@ -240,22 +269,22 @@ services:
   tempo:
     image: grafana/tempo:latest
     container_name: ${NAMESPACE:-insightops}_tempo
-    command: ["-config.file=/etc/tempo.yaml"]  # Ensure the correct path
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
     environment:
-      - TEMPO_LOG_LEVEL=debug  # Set log level to debug to get more insights during troubleshooting
+      - TEMPO_LOG_LEVEL=debug
     volumes:
-      - ./Configurations/tempo.yaml:/etc/tempo.yaml:ro  # Double-check path and set to read-only
-      - tempo_data:/tmp/tempo  # Ensure /tmp/tempo directory is writable
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/tmp/tempo
     ports:
-      - "${TEMPO_GRPC_PORT:-4317}:4317"
-      - "${TEMPO_HTTP_PORT:-4318}:4318"
-      - "3200:3200"  # Tempo HTTP listening port for metrics and API
-      - "9411:9411"  # Zipkin compatibility port, if needed
+      - "4317:4317"
+      - "4318:4318"
+      - "3200:3200"
     healthcheck:
       <<: *default-healthcheck
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
       start_period: 45s
     logging: *default-logging
+    restart: unless-stopped
 
 volumes:
   postgres_data:
@@ -300,17 +329,23 @@ function Initialize-Environment {
 
         # Set up main configuration files
         Write-Host "`nSetting up configuration files:" -ForegroundColor Yellow
+        
+        # Write Tempo configuration using dedicated function
+        $tempoPath = Join-Path $script:CONFIG_PATH "tempo/tempo.yaml"
+        if (Write-TempoConfig -Path $tempoPath) {
+            Write-Host "  [Created] tempo/tempo.yaml" -ForegroundColor Green
+        }
+
+        # Write other configurations
         $configs = @{
-            "tempo/tempo.yaml" = Get-TempoConfig
             "docker-compose.yml" = Get-DockerComposeConfig
-            "prometheus/prometheus.yml" = Get-PrometheusConfig
-            "loki/loki-config.yaml" = Get-LokiConfig
+            "prometheus/prometheus.yml" = $script:CONFIG_TEMPLATES.Prometheus
+            "loki/loki-config.yaml" = $script:CONFIG_TEMPLATES.Loki
         }
 
         foreach ($config in $configs.GetEnumerator()) {
             $filePath = Join-Path $script:CONFIG_PATH $config.Key
             if ((-not (Test-Path $filePath)) -or $Force) {
-                # Ensure directory exists
                 $directory = Split-Path $filePath -Parent
                 if (-not (Test-Path $directory)) {
                     New-Item -ItemType Directory -Path $directory -Force | Out-Null
@@ -324,13 +359,10 @@ function Initialize-Environment {
 
         # Set up Grafana configurations
         Write-Host "`nSetting up Grafana configurations:" -ForegroundColor Yellow
-        
-        # Create Grafana directory structure
         $grafanaBasePath = Join-Path $script:CONFIG_PATH "grafana"
         $grafanaDashboardsPath = Join-Path $grafanaBasePath "provisioning\dashboards"
         $grafanaDatasourcesPath = Join-Path $grafanaBasePath "provisioning\datasources"
 
-        # Ensure directories exist
         @($grafanaDashboardsPath, $grafanaDatasourcesPath) | ForEach-Object {
             if (-not (Test-Path $_)) {
                 New-Item -ItemType Directory -Path $_ -Force | Out-Null
@@ -338,82 +370,20 @@ function Initialize-Environment {
             }
         }
 
-        # Create dashboard configuration
+        # Create Grafana configurations
         $dashboardFile = Join-Path $grafanaDashboardsPath "dashboard.yml"
+        $datasourceFile = Join-Path $grafanaDatasourcesPath "datasources.yaml"
+
         if ((-not (Test-Path $dashboardFile)) -or $Force) {
             Set-Content -Path $dashboardFile -Value $script:CONFIG_TEMPLATES.GrafanaDashboard -Force
             Write-Host "  [Created] grafana/provisioning/dashboards/dashboard.yml" -ForegroundColor Green
-        } else {
-            Write-Host "  [Exists] grafana/provisioning/dashboards/dashboard.yml" -ForegroundColor Cyan
         }
-
-        # Create datasource configuration
-        $datasourceFile = Join-Path $grafanaDatasourcesPath "datasources.yaml"
         if ((-not (Test-Path $datasourceFile)) -or $Force) {
             Set-Content -Path $datasourceFile -Value $script:CONFIG_TEMPLATES.GrafanaDatasource -Force
             Write-Host "  [Created] grafana/provisioning/datasources/datasources.yaml" -ForegroundColor Green
-        } else {
-            Write-Host "  [Exists] grafana/provisioning/datasources/datasources.yaml" -ForegroundColor Cyan
         }
 
-        # Create environment files
-        Write-Host "`nSetting up environment files:" -ForegroundColor Yellow
-        if (Set-EnvironmentConfig -Environment $Environment -Force:$Force) {
-            Write-Host "  [OK] Created .env.$Environment" -ForegroundColor Green
-        }
-
-        Write-Host "`nEnvironment initialization completed" -ForegroundColor Green
-        return $true
-    }
-    catch {
-        Write-Host "`nEnvironment initialization failed: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host "Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
-        return $false
-    }
-}
-
-function __Initialize-Environment {
-    [CmdletBinding()]
-    param(
-        [string]$Environment = "Development",
-        [switch]$Force
-    )
-    
-    try {
-        Write-Host "`nInitializing environment: $Environment" -ForegroundColor Cyan
-        Write-Host "Using configuration path: $script:CONFIG_PATH" -ForegroundColor Yellow
-
-        # Create required directories
-        Write-Host "`nCreating required directories:" -ForegroundColor Yellow
-        foreach ($path in $script:REQUIRED_PATHS) {
-            if (-not (Test-Path $path)) {
-                New-Item -ItemType Directory -Path $path -Force | Out-Null
-                Write-Host "  [Created] $($path.Split('\')[-1])" -ForegroundColor Green
-            } else {
-                Write-Host "  [Exists] $($path.Split('\')[-1])" -ForegroundColor Cyan
-            }
-        }
-
-        # Create configuration files
-        Write-Host "`nSetting up configuration files:" -ForegroundColor Yellow
-        $templates = @{
-            "prometheus.yml" = Get-PrometheusConfig
-            "loki-config.yaml" = Get-LokiConfig
-            "tempo.yaml" = Get-TempoConfig
-            "docker-compose.yml" = Get-DockerComposeConfig
-        }
-
-        foreach ($template in $templates.GetEnumerator()) {
-            $filePath = Join-Path $script:CONFIG_PATH $template.Key
-            if ((-not (Test-Path $filePath)) -or $Force) {
-                $template.Value | Set-Content -Path $filePath -Force
-                Write-Host "  [Created] $($template.Key)" -ForegroundColor Green
-            } else {
-                Write-Host "  [Exists] $($template.Key)" -ForegroundColor Cyan
-            }
-        }
-
-        # Create environment files
+        # Set up environment files
         Write-Host "`nSetting up environment files:" -ForegroundColor Yellow
         if (Set-EnvironmentConfig -Environment $Environment -Force:$Force) {
             Write-Host "  [OK] Created .env.$Environment" -ForegroundColor Green
@@ -432,6 +402,7 @@ function __Initialize-Environment {
 function Set-EnvironmentConfig {
     [CmdletBinding()]
     param(
+        [Parameter(Mandatory = $true)]
         [string]$Environment,
         [switch]$Force
     )
@@ -439,266 +410,175 @@ function Set-EnvironmentConfig {
     try {
         $envFile = Join-Path $script:CONFIG_PATH ".env.$Environment"
         
+        # Base URLs for different environments
+        $baseUrls = @{
+            Development = "http://localhost"
+            Production = "http://api.insightops.com"  # Change as needed
+        }
+
         # Basic environment variables
         $envVars = @{
+            # Environment settings
             NAMESPACE = $script:NAMESPACE
             ENVIRONMENT = $Environment
             ASPNETCORE_ENVIRONMENT = $Environment
+            
+            # Security settings
             GRAFANA_USER = "admin"
             GRAFANA_PASSWORD = "InsightOps2024!"
             DB_USER = "insightops_user"
             DB_PASSWORD = "insightops_pwd"
             DB_NAME = "insightops_db"
+            
+            # Service URLs
+            BASE_URL = $baseUrls[$Environment]
+            
+            # Development ports
             DB_PORT = if ($Environment -eq "Development") { "5433" } else { "5432" }
             FRONTEND_PORT = if ($Environment -eq "Development") { "5010" } else { "80" }
             GATEWAY_PORT = if ($Environment -eq "Development") { "5011" } else { "8080" }
             ORDER_PORT = if ($Environment -eq "Development") { "5012" } else { "8081" }
             INVENTORY_PORT = if ($Environment -eq "Development") { "5013" } else { "8082" }
+            
+            # Observability stack ports
             GRAFANA_PORT = if ($Environment -eq "Development") { "3001" } else { "3000" }
             PROMETHEUS_PORT = if ($Environment -eq "Development") { "9091" } else { "9090" }
             LOKI_PORT = if ($Environment -eq "Development") { "3101" } else { "3100" }
             TEMPO_PORT = "4317"
+            TEMPO_HTTP_PORT = "4318"
+            TEMPO_QUERY_PORT = "3200"
+            
+            # Retention settings
             METRICS_RETENTION = "30d"
+            LOGS_RETENTION = "7d"
+            TRACES_RETENTION = "48h"
+
+            # OpenTelemetry settings
+            OTEL_EXPORTER_OTLP_ENDPOINT = "http://tempo:4317"
+            OTEL_SERVICE_NAME = "insightops"
+            OTEL_RESOURCE_ATTRIBUTES = "service.namespace=insightops"
+            
+            # Feature flags
+            ENABLE_TRACING = "true"
+            ENABLE_METRICS = "true"
+            ENABLE_LOGGING = "true"
+            
+            # Database connection string template
+            DB_CONNECTION_STRING = "Host=localhost;Port=${DB_PORT};Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD}"
+            
+            # Service dependencies
+            PROMETHEUS_URL = "http://prometheus:9090"
+            LOKI_URL = "http://loki:3100"
+            TEMPO_URL = "http://tempo:4317"
+            GRAFANA_URL = "http://grafana:3000"
+        }
+        
+        # Environment-specific overrides
+        if ($Environment -eq "Development") {
+            $envVars["LOG_LEVEL"] = "Debug"
+            $envVars["ASPNETCORE_URLS"] = "http://+:80"
+        } else {
+            $envVars["LOG_LEVEL"] = "Information"
+            $envVars["ASPNETCORE_URLS"] = "http://+:80;https://+:443"
         }
 
-        # Create environment file content
-        $envContent = $envVars.GetEnumerator() | ForEach-Object {
+        # Create environment file content with proper formatting
+        $envContent = $envVars.GetEnumerator() | Sort-Object Key | ForEach-Object {
             "$($_.Key)=$($_.Value)"
         }
 
-        # Write to file
-        Set-Content -Path $envFile -Value $envContent -Force
+        # Ensure directory exists
+        $directory = Split-Path $envFile -Parent
+        if (-not (Test-Path $directory)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+
+        # Write to file using UTF8 without BOM
+        $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($envFile, ($envContent -join "`n"), $utf8NoBomEncoding)
+
+        Write-Host "Updated environment configuration: $envFile" -ForegroundColor Green
+        
+        # Create symlink for default .env file if in Development
+        if ($Environment -eq "Development") {
+            $defaultEnvFile = Join-Path $script:CONFIG_PATH ".env"
+            if (Test-Path $defaultEnvFile) {
+                Remove-Item $defaultEnvFile -Force
+            }
+            
+            # Create symbolic link on Windows
+            if ($IsWindows) {
+                New-Item -ItemType SymbolicLink -Path $defaultEnvFile -Target $envFile -Force | Out-Null
+            } else {
+                # For non-Windows systems
+                ln -sf $envFile $defaultEnvFile
+            }
+            
+            Write-Host "Created symlink: $defaultEnvFile -> $envFile" -ForegroundColor Green
+        }
+
         return $true
     }
     catch {
         Write-Host "Failed to set environment configuration: $_" -ForegroundColor Red
+        Write-Host $_.ScriptStackTrace -ForegroundColor Red
         return $false
     }
 }
 
-function Set-PrometheusConfig {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $false)]
-        [switch]$Force
-    )
-    
-    $configPath = Join-Path $CONFIG_PATH "prometheus/prometheus.yml"
-    if (-not (Test-Path $configPath) -or $Force) {
-        Set-Content -Path $configPath -Value $CONFIG_TEMPLATES.Prometheus -Force
-        Write-InfoMessage "Created Prometheus configuration: $configPath"
-    }
+function Get-PrometheusConfig {
+    return $script:CONFIG_TEMPLATES.Prometheus
 }
 
-function Set-LokiConfig {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $false)]
-        [switch]$Force
-    )
-    
-    $configPath = Join-Path $CONFIG_PATH "loki/loki-config.yaml"
-    if (-not (Test-Path $configPath) -or $Force) {
-        Set-Content -Path $configPath -Value $CONFIG_TEMPLATES.Loki -Force
-        Write-InfoMessage "Created Loki configuration: $configPath"
-    }
+function Get-LokiConfig {
+    return $script:CONFIG_TEMPLATES.Loki
 }
 
-function Set-TempoConfig {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $false)]
-        [switch]$Force
-    )
-    
-    $configPath = Join-Path $CONFIG_PATH "tempo/tempo.yaml"
-    if (-not (Test-Path $configPath) -or $Force) {
-        Set-Content -Path $configPath -Value $CONFIG_TEMPLATES.Tempo -Force
-        Write-InfoMessage "Created Tempo configuration: $configPath"
-    }
+function Get-TempoConfig {
+    return $script:CONFIG_TEMPLATES.Tempo
 }
 
-function Set-GrafanaConfig {
+# Helper Functions for Configuration
+function Write-ConfigFile {
     [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $false)]
-        [switch]$Force
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$Content,
+        
+        [string]$Description = "configuration file"
     )
     
-    # Set up dashboard configuration
-    $dashboardConfig = Join-Path $CONFIG_PATH "grafana/provisioning/dashboards/dashboard.yml"
-    if (-not (Test-Path $dashboardConfig) -or $Force) {
-        Set-Content -Path $dashboardConfig -Value $CONFIG_TEMPLATES.GrafanaDashboard -Force
-        Write-InfoMessage "Created Grafana dashboard configuration: $dashboardConfig"
+    try {
+        # Create directory if it doesn't exist
+        $directory = Split-Path -Parent $Path
+        if (-not (Test-Path $directory)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+            Write-Verbose "Created directory: $directory"
+        }
+
+        # Write content with UTF8 encoding without BOM
+        $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBomEncoding)
+        
+        Write-Verbose "Successfully wrote $Description to: $Path"
+        return $true
     }
-    
-    # Set up datasource configuration
-    $datasourceConfig = Join-Path $CONFIG_PATH "grafana/provisioning/datasources/datasources.yaml"
-    if (-not (Test-Path $datasourceConfig) -or $Force) {
-        Set-Content -Path $datasourceConfig -Value $CONFIG_TEMPLATES.GrafanaDatasource -Force
-        Write-InfoMessage "Created Grafana datasource configuration: $datasourceConfig"
+    catch {
+        Write-Error "Failed to write $Description to $Path : $_"
+        return $false
     }
 }
-
-    function Set-EnvironmentVariables {
-        [CmdletBinding()]
-        param (
-            [Parameter(Mandatory = $true)]
-            [string]$Environment
-        )
-        
-        $envFile = Join-Path $CONFIG_PATH ".env.$Environment"
-        $defaultEnvFile = Join-Path $CONFIG_PATH ".env"
-        
-        try {
-            # Default environment variables
-            $defaultEnvVars = @{
-                NAMESPACE = $NAMESPACE
-                ENVIRONMENT = $Environment
-                GRAFANA_USER = "admin"
-                GRAFANA_PASSWORD = "InsightOps2024!"
-                DB_USER = "insightops_user"
-                DB_PASSWORD = "insightops_pwd"
-                DB_NAME = "insightops_db"
-                METRICS_RETENTION = "30d"
-                TEMPO_RETENTION = "24h"
-            }
-
-            # Environment-specific overrides
-            $envSpecificVars = switch ($Environment.ToLower()) {
-                "development" {
-                    @{
-                        ASPNETCORE_ENVIRONMENT = "Development"
-                        FRONTEND_PORT = "5010"
-                        GATEWAY_PORT = "5011"
-                        ORDER_PORT = "5012"
-                        INVENTORY_PORT = "5013"
-                        GRAFANA_PORT = "3001"
-                        PROMETHEUS_PORT = "9091"
-                        LOKI_PORT = "3101"
-                        TEMPO_PORT = "4317"
-                        DB_PORT = "5433"
-                    }
-                }
-                "production" {
-                    @{
-                        ASPNETCORE_ENVIRONMENT = "Production"
-                        FRONTEND_PORT = "80"
-                        GATEWAY_PORT = "8080"
-                        ORDER_PORT = "8081"
-                        INVENTORY_PORT = "8082"
-                        GRAFANA_PORT = "3000"
-                        PROMETHEUS_PORT = "9090"
-                        LOKI_PORT = "3100"
-                        TEMPO_PORT = "4317"
-                        DB_PORT = "5432"
-                    }
-                }
-                default {
-                    Write-WarningMessage "Unknown environment: $Environment. Using development settings."
-                    @{}
-                }
-            }
-
-            # Combine default and environment-specific variables
-            $allEnvVars = $defaultEnvVars + $envSpecificVars
-
-            # Create environment-specific .env file
-            $envContent = $allEnvVars.GetEnumerator() | ForEach-Object {
-                "${0}=${1}" -f $_.Key, $_.Value
-            }
-
-            Set-Content -Path $envFile -Value $envContent -Force
-            Write-InfoMessage "Created environment file: $envFile"
-
-            # Create symlink for default .env file
-            if (Test-Path $defaultEnvFile) {
-                Remove-Item $defaultEnvFile -Force
-            }
-            New-Item -ItemType SymbolicLink -Path $defaultEnvFile -Target $envFile -Force
-            Write-InfoMessage "Created symlink: $defaultEnvFile -> $envFile"
-        }
-        catch {
-            Write-ErrorMessage ("Failed to set environment variables: {0}" -f $_)
-            return $false
-        }
-    }
-
-    function Set-SSLCertificates {
-        [CmdletBinding()]
-        param (
-            [Parameter(Mandatory = $true)]
-            [string]$Environment
-        )
-        
-        if ($Environment -eq "Development") {
-            Write-InfoMessage "Skipping SSL certificate setup for Development environment"
-            return $true
-        }
-
-        try {
-            $certPath = Join-Path $CONFIG_PATH "certificates"
-            if (-not (Test-Path $certPath)) {
-                New-Item -ItemType Directory -Path $certPath -Force | Out-Null
-            }
-
-            # Generate self-signed certificate for testing
-            $cert = New-SelfSignedCertificate `
-                -DnsName "insightops.local" `
-                -CertStoreLocation "Cert:\LocalMachine\My" `
-                -NotAfter (Get-Date).AddYears(1) `
-                -KeySpec KeyExchange
-
-            # Export certificate
-            $certPassword = ConvertTo-SecureString -String "InsightOps2024!" -Force -AsPlainText
-            $certFile = Join-Path $certPath "insightops.pfx"
-            Export-PfxCertificate -Cert $cert -FilePath $certFile -Password $certPassword -Force
-
-            Write-SuccessMessage "SSL certificates generated successfully"
-            return $true
-        }
-        catch {
-            Write-ErrorMessage ("Failed to set up SSL certificates: {0}" -f $_)
-            return $false
-        }
-    }
-
-    function Backup-Environment {
-        [CmdletBinding()]
-        param (
-            [Parameter(Mandatory = $false)]
-            [string]$BackupPath = (Join-Path $BACKUP_PATH (Get-Date -Format "yyyyMMdd_HHmmss"))
-        )
-        
-        try {
-            Write-InfoMessage "Creating environment backup..."
-
-            # Create backup directory
-            New-Item -ItemType Directory -Path $BackupPath -Force | Out-Null
-
-            # Backup configuration files
-            Copy-Item -Path $CONFIG_PATH -Destination $BackupPath -Recurse -Force
-            
-            # Backup environment variables
-            Get-ChildItem -Path $CONFIG_PATH -Filter ".env*" | Copy-Item -Destination $BackupPath -Force
-
-            Write-SuccessMessage "Environment backup created successfully at: $BackupPath"
-            return $true
-        }
-        catch {
-            Write-ErrorMessage ("Failed to backup environment: {0}" -f $_)
-            return $false
-        }
-    }
 
 # Export module members
 Export-ModuleMember -Function @(
     'Initialize-Environment',
     'Set-EnvironmentConfig',
-    'Set-SSLCertificates',
-    'Backup-Environment',
     'Get-PrometheusConfig',
     'Get-LokiConfig',
     'Get-TempoConfig',
-    'Get-DockerComposeConfig'
+    'Get-DockerComposeConfig',
+    'Write-ConfigFile'
 )

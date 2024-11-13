@@ -3,21 +3,32 @@ server:
 
 distributor:
   receivers:
-    jaeger:
-      protocols:
-        thrift_http:
-          endpoint: 0.0.0.0:14268
-        grpc:
-          endpoint: 0.0.0.0:14250
     otlp:
       protocols:
-        http:
-          endpoint: 0.0.0.0:4318
         grpc:
-          endpoint: 0.0.0.0:4317
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
 
 storage:
   trace:
-    backend: local
+    backend: "local"    # Added quotes
+    wal:
+      path: /tmp/tempo/wal
     local:
       path: /tmp/tempo/blocks
+
+ingester:
+  max_block_duration: "5m"
+  trace_idle_period: "10s"
+
+compactor:
+  compaction:
+    block_retention: 48h
+
+metrics_generator:
+  storage:
+    path: /tmp/tempo/generator/wal
+
+usage_report:
+  reporting_enabled: false

@@ -151,7 +151,7 @@ function Show-Menu {
 function Initialize-Application {
     try {
         Write-ModuleMessage "`nInitializing InsightOps Management Console..." -Color Cyan
-
+        
         # Verify script paths
         Write-ModuleMessage "Script Location: $PSScriptRoot" -Color Yellow
         Write-ModuleMessage "Module Path: $script:MODULE_PATH" -Color Yellow
@@ -162,9 +162,39 @@ function Initialize-Application {
             Write-ModuleMessage "Created Modules directory" -Color Yellow
         }
 
-        # Define module loading order
+        # Load Core module first
+        $corePath = Join-Path $script:MODULE_PATH "Core.psm1"
+        Write-ModuleMessage "Loading Core module from: $corePath" -Color Yellow
+        
+        if (-not (Test-Path $corePath)) {
+            throw "Core module not found at: $corePath"
+        }
+
+        # Remove existing Core module if loaded
+        if (Get-Module Core) {
+            Remove-Module Core -Force
+        }
+
+        # Import Core module
+        Import-Module $corePath -Force -DisableNameChecking -Global -Verbose
+        Write-ModuleMessage "Successfully imported Core module" -Color Green
+
+        # Verify Core module loaded correctly
+        $coreModule = Get-Module Core
+        if (-not $coreModule) {
+            throw "Failed to load Core module"
+        }
+
+        # Verify CONFIG_PATH is available
+        if (-not ($coreModule.ExportedVariables.ContainsKey('CONFIG_PATH'))) {
+            throw "Core module did not export CONFIG_PATH variable"
+        }
+
+        $configPath = $coreModule.ExportedVariables['CONFIG_PATH'].Value
+        Write-ModuleMessage "Config Path: $configPath" -Color Yellow
+
+        # Continue with other modules...
         $moduleOrder = @(
-            'Core',
             'Logging',
             'Utilities',
             'Prerequisites',
@@ -172,22 +202,16 @@ function Initialize-Application {
             'DockerOperations'
         )
 
-        # Load all modules
         foreach ($module in $moduleOrder) {
             try {
                 $modulePath = Join-Path $script:MODULE_PATH "$module.psm1"
                 Write-ModuleMessage "Loading module from: $modulePath" -Color Yellow
                 
-                if (-not (Test-Path $modulePath)) {
-                    throw "Module file not found: $modulePath"
-                }
-
                 # Remove existing module if loaded
                 if (Get-Module $module) {
                     Remove-Module $module -Force
                 }
-
-                # Import the module
+                
                 Import-Module $modulePath -Force -DisableNameChecking -Global
                 Write-ModuleMessage "Successfully imported module: $module" -Color Green
             }
@@ -200,142 +224,6 @@ function Initialize-Application {
 
         Write-ModuleMessage "Initialization completed successfully" -Color Green
         return $true
-    }
-    catch {
-        Write-ModuleMessage "Application initialization failed: $_" -Color Red
-        return $false
-    }
-}
-
-function _Initialize-Application {
-    try {
-        Write-ModuleMessage "`nInitializing InsightOps Management Console..." -Color Cyan
-
-        # Create Modules directory if it doesn't exist
-        if (-not (Test-Path $script:MODULE_PATH)) {
-            New-Item -ItemType Directory -Path $script:MODULE_PATH -Force | Out-Null
-            Write-ModuleMessage "Created Modules directory" -Color Yellow
-        }
-
-        # Define module loading order - Core must be first
-        $moduleOrder = @(
-            'Core',              # Must be first as others depend on it
-            'Logging',
-            'Utilities',
-            'Prerequisites',
-            'EnvironmentSetup',  # Needs Core to be loaded first
-            'DockerOperations'
-        )
-
-        # Define required functions for each module
-        $requiredExports = @{
-            'Core' = @('Test-Configuration', 'Initialize-DefaultConfigurations')
-            'Logging' = @('Write-Info', 'Write-Success', 'Write-Warning', 'Write-Error')
-            'EnvironmentSetup' = @('Initialize-Environment', 'Set-EnvironmentConfig')
-            'Prerequisites' = @('Test-AllPrerequisites')
-            'DockerOperations' = @('Initialize-DockerEnvironment', 'Start-DockerServices', 'Stop-DockerServices')
-        }
-
-        # Load all modules
-        $loadedModules = @()
-        foreach ($module in $moduleOrder) {
-            try {
-                $modulePath = Join-Path $script:MODULE_PATH "$module.psm1"
-                
-                if (-not (Test-Path $modulePath)) {
-                    throw "Module file not found: $modulePath"
-                }
-
-                # Remove existing module if loaded
-                if (Get-Module $module) {
-                    Remove-Module $module -Force -ErrorAction Stop
-                }
-
-                # Import the module
-                Import-Module $modulePath -Force -DisableNameChecking -Global -ErrorAction Stop
-                Write-ModuleMessage "Successfully imported module: $module" -Color Green
-                
-                # Verify required functions are exported
-                if ($requiredExports.ContainsKey($module)) {
-                    $module = Get-Module $module
-                    foreach ($requiredFunction in $requiredExports[$module]) {
-                        if (-not $module.ExportedFunctions.ContainsKey($requiredFunction)) {
-                            throw "Required function '$requiredFunction' not exported from module '$module'"
-                        }
-                    }
-                }
-                
-                $loadedModules += $module
-            }
-            catch {
-                Write-ModuleMessage "Critical error loading $module" -Color Red
-                Write-ModuleMessage $_.Exception.Message -Color Red
-                Write-ModuleMessage $_.ScriptStackTrace -Color Red
-                
-                # Unload modules in reverse order
-                [array]::Reverse($loadedModules)
-                foreach ($loadedModule in $loadedModules) {
-                    try {
-                        Remove-Module $loadedModule -Force -ErrorAction SilentlyContinue
-                    }
-                    catch {
-                        Write-ModuleMessage "Failed to unload module $loadedModule" -Color Yellow
-                    }
-                }
-                return $false
-            }
-        }
-
-        # Initialize configurations
-        try {
-            Write-ModuleMessage "Checking configuration..." -Color Cyan
-            
-            # Verify Core module functions are available
-            $coreModule = Get-Module Core
-            if (-not $coreModule) {
-                throw "Core module not loaded"
-            }
-
-            # Check configuration
-            $testConfig = $coreModule.ExportedFunctions['Test-Configuration']
-            if (-not $testConfig) {
-                throw "Test-Configuration function not available"
-            }
-
-            if (-not (& $testConfig)) {
-                Write-ModuleMessage "Creating default configurations..." -Color Yellow
-                $initConfig = $coreModule.ExportedFunctions['Initialize-DefaultConfigurations']
-                if (-not $initConfig) {
-                    throw "Initialize-DefaultConfigurations function not available"
-                }
-                if (-not (& $initConfig)) {
-                    throw "Failed to create default configurations"
-                }
-            }
-
-            # Initialize Docker environment
-            $dockerModule = Get-Module DockerOperations
-            if (-not $dockerModule) {
-                throw "DockerOperations module not loaded"
-            }
-
-            $initDocker = $dockerModule.ExportedFunctions['Initialize-DockerEnvironment']
-            if (-not $initDocker) {
-                throw "Initialize-DockerEnvironment function not available"
-            }
-
-            if (-not (& $initDocker)) {
-                throw "Failed to initialize Docker environment"
-            }
-
-            Write-ModuleMessage "Initialization completed successfully" -Color Green
-            return $true
-        }
-        catch {
-            Write-ModuleMessage "Initialization failed: $_" -Color Red
-            Write-ModuleMessage $_.ScriptStackTrace -Color Red
-            return $false
-        }
     }
     catch {
         Write-ModuleMessage "Application initialization failed: $_" -Color Red

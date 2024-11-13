@@ -3,16 +3,9 @@
 
 # Base paths - corrected path resolution
 $script:PROJECT_ROOT = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-if (-not $script:PROJECT_ROOT) {
-    throw "Failed to resolve project root path"
-}
-
 $script:CONFIG_PATH = Join-Path -Path $script:PROJECT_ROOT -ChildPath "Configurations"
-if (-not $script:CONFIG_PATH) {
-    throw "Failed to resolve configuration path"
-}
 
-# Log path resolution for debugging
+# Output path information for debugging
 Write-Verbose "PSScriptRoot: $PSScriptRoot"
 Write-Verbose "Project Root: $script:PROJECT_ROOT"
 Write-Verbose "Config Path: $script:CONFIG_PATH"
@@ -34,12 +27,30 @@ $script:REQUIRED_PATHS = @(
 # Required configuration files
 $script:REQUIRED_FILES = @{
     "docker-compose.yml" = Join-Path -Path $script:CONFIG_PATH -ChildPath "docker-compose.yml"
-    "tempo.yaml" = Join-Path -Path $script:CONFIG_PATH -ChildPath "tempo.yaml"
-    "loki-config.yaml" = Join-Path -Path $script:CONFIG_PATH -ChildPath "loki-config.yaml"
-    "prometheus.yml" = Join-Path -Path $script:CONFIG_PATH -ChildPath "prometheus.yml"
+    "tempo.yaml" = Join-Path -Path $script:CONFIG_PATH -ChildPath "tempo/tempo.yaml"
+    "loki-config.yaml" = Join-Path -Path $script:CONFIG_PATH -ChildPath "loki/loki-config.yaml"
+    "prometheus.yml" = Join-Path -Path $script:CONFIG_PATH -ChildPath "prometheus/prometheus.yml"
     ".env.development" = Join-Path -Path $script:CONFIG_PATH -ChildPath ".env.development"
     ".env.production" = Join-Path -Path $script:CONFIG_PATH -ChildPath ".env.production"
 }
+
+# Initialize function to ensure paths exist
+function Initialize-CorePaths {
+    if (-not (Test-Path $script:CONFIG_PATH)) {
+        New-Item -ItemType Directory -Path $script:CONFIG_PATH -Force | Out-Null
+        Write-Verbose "Created configuration directory: $script:CONFIG_PATH"
+    }
+
+    foreach ($path in $script:REQUIRED_PATHS) {
+        if (-not (Test-Path $path)) {
+            New-Item -ItemType Directory -Path $path -Force | Out-Null
+            Write-Verbose "Created directory: $path"
+        }
+    }
+}
+
+# Call initialization
+Initialize-CorePaths
 
 # Service Configuration with health checks
 $script:SERVICES = @{
@@ -437,7 +448,6 @@ function Get-TempoConfig {
     return @'
 server:
   http_listen_port: 3200
-  grpc_listen_port: 9096
 
 distributor:
   receivers:
@@ -452,13 +462,24 @@ storage:
   trace:
     backend: local
     wal:
-      path: /tmp/tempo/wal
+      path: /tmp/tempo/wal    # Required WAL path
     local:
-      path: /tmp/tempo/blocks
+      path: /tmp/tempo/blocks # Required blocks path
 
 compactor:
   compaction:
-    block_retention: 24h
+    block_retention: 48h
+
+ingester:
+  max_block_duration: "5m"
+  trace_idle_period: "10s"
+
+metrics_generator:
+  storage:
+    path: /tmp/tempo/generator/wal
+
+usage_report:
+  reporting_enabled: false
 '@
 }
 
@@ -536,25 +557,32 @@ services:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready"]
     logging: *default-logging
 
-tempo:
+  tempo:
     image: grafana/tempo:latest
     container_name: ${NAMESPACE:-insightops}_tempo
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     environment:
-      - TEMPO_LOG_LEVEL=debug
+      - JAEGER_AGENT_HOST=tempo
+      - JAEGER_ENDPOINT=http://tempo:14268/api/traces
+      - TEMPO_PROMETHEUS_ENDPOINT=http://prometheus:9090
     volumes:
-      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro  # Fixed path
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
       - tempo_data:/tmp/tempo
     ports:
-      - "${TEMPO_PORT:-4317}:4317"
-      - "${TEMPO_HTTP_PORT:-4318}:4318"
-      - "3200:3200"
-      - "9411:9411"
+      - "${TEMPO_PORT:-4317}:4317"  # OTLP gRPC
+      - "${TEMPO_HTTP_PORT:-4318}:4318"  # OTLP HTTP
+      - "3200:3200"  # Query endpoint
+      - "9096:9096"  # gRPC
+      - "14250:14250"  # Jaeger gRPC
+      - "14268:14268"  # Jaeger HTTP
+    depends_on:
+      - prometheus
     healthcheck:
       <<: *default-healthcheck
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
       start_period: 45s
     logging: *default-logging
+    restart: unless-stopped
 
   frontend:
     build: 
@@ -662,19 +690,33 @@ networks:
 '@
 }
 
-# Export module members
 Export-ModuleMember -Function @(
+    # Configuration management
     'Test-Configuration',
     'Initialize-DefaultConfigurations',
+    'Initialize-CorePaths',
+    
+    # Environment configuration
     'Set-EnvironmentConfig',
+    
+    # Configuration generators
     'Get-PrometheusConfig',
     'Get-LokiConfig',
     'Get-TempoConfig',
     'Get-DockerComposeConfig'
 ) -Variable @(
-    'NAMESPACE',
-    'SERVICES',
+    # Paths
+    'PROJECT_ROOT',
     'CONFIG_PATH',
+    
+    # Environment settings
+    'NAMESPACE',
+    'DEFAULT_ENVIRONMENT',
+    
+    # Configuration structures
+    'REQUIRED_PATHS',
     'REQUIRED_FILES',
-    'REQUIRED_PATHS'
+    
+    # Service configurations
+    'SERVICES'
 )
