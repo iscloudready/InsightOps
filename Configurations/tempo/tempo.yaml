@@ -10,21 +10,22 @@ distributor:
         http:
           endpoint: "0.0.0.0:4318"
 
-storage:
-  trace:
-    backend: "local"    # Added quotes
-    wal:
-      path: /tmp/tempo/wal
-    local:
-      path: /tmp/tempo/blocks
-
 ingester:
-  max_block_duration: "5m"
   trace_idle_period: "10s"
+  max_block_duration: "5m"
+  complete_block_timeout: "5m"
 
 compactor:
   compaction:
     block_retention: 48h
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /tmp/tempo
+    wal:
+      path: /tmp/tempo/wal
 
 metrics_generator:
   storage:

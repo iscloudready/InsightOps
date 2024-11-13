@@ -95,14 +95,6 @@ distributor:
         http:
           endpoint: "0.0.0.0:4318"
 
-storage:
-  trace:
-    backend: local
-    wal:
-      path: /tmp/tempo/wal
-    local:
-      path: /tmp/tempo/blocks
-
 ingester:
   max_block_duration: "5m"
   trace_idle_period: "10s"
@@ -110,6 +102,14 @@ ingester:
 compactor:
   compaction:
     block_retention: 48h
+
+storage:
+  trace:
+    backend: "local"    # Notice the quotes
+    local:
+      path: /tmp/tempo/blocks
+    wal:
+      path: /tmp/tempo/wal
 
 metrics_generator:
   storage:
@@ -410,12 +410,6 @@ function Set-EnvironmentConfig {
     try {
         $envFile = Join-Path $script:CONFIG_PATH ".env.$Environment"
         
-        # Base URLs for different environments
-        $baseUrls = @{
-            Development = "http://localhost"
-            Production = "http://api.insightops.com"  # Change as needed
-        }
-
         # Basic environment variables
         $envVars = @{
             # Environment settings
@@ -423,17 +417,7 @@ function Set-EnvironmentConfig {
             ENVIRONMENT = $Environment
             ASPNETCORE_ENVIRONMENT = $Environment
             
-            # Security settings
-            GRAFANA_USER = "admin"
-            GRAFANA_PASSWORD = "InsightOps2024!"
-            DB_USER = "insightops_user"
-            DB_PASSWORD = "insightops_pwd"
-            DB_NAME = "insightops_db"
-            
-            # Service URLs
-            BASE_URL = $baseUrls[$Environment]
-            
-            # Development ports
+            # Service ports
             DB_PORT = if ($Environment -eq "Development") { "5433" } else { "5432" }
             FRONTEND_PORT = if ($Environment -eq "Development") { "5010" } else { "80" }
             GATEWAY_PORT = if ($Environment -eq "Development") { "5011" } else { "8080" }
@@ -448,6 +432,13 @@ function Set-EnvironmentConfig {
             TEMPO_HTTP_PORT = "4318"
             TEMPO_QUERY_PORT = "3200"
             
+            # Security settings
+            GRAFANA_USER = "admin"
+            GRAFANA_PASSWORD = "InsightOps2024!"
+            DB_USER = "insightops_user"
+            DB_PASSWORD = "insightops_pwd"
+            DB_NAME = "insightops_db"
+            
             # Retention settings
             METRICS_RETENTION = "30d"
             LOGS_RETENTION = "7d"
@@ -456,30 +447,12 @@ function Set-EnvironmentConfig {
             # OpenTelemetry settings
             OTEL_EXPORTER_OTLP_ENDPOINT = "http://tempo:4317"
             OTEL_SERVICE_NAME = "insightops"
-            OTEL_RESOURCE_ATTRIBUTES = "service.namespace=insightops"
             
-            # Feature flags
-            ENABLE_TRACING = "true"
-            ENABLE_METRICS = "true"
-            ENABLE_LOGGING = "true"
-            
-            # Database connection string template
-            DB_CONNECTION_STRING = "Host=localhost;Port=${DB_PORT};Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD}"
-            
-            # Service dependencies
+            # Service URLs
             PROMETHEUS_URL = "http://prometheus:9090"
             LOKI_URL = "http://loki:3100"
             TEMPO_URL = "http://tempo:4317"
             GRAFANA_URL = "http://grafana:3000"
-        }
-        
-        # Environment-specific overrides
-        if ($Environment -eq "Development") {
-            $envVars["LOG_LEVEL"] = "Debug"
-            $envVars["ASPNETCORE_URLS"] = "http://+:80"
-        } else {
-            $envVars["LOG_LEVEL"] = "Information"
-            $envVars["ASPNETCORE_URLS"] = "http://+:80;https://+:443"
         }
 
         # Create environment file content with proper formatting
@@ -487,41 +460,15 @@ function Set-EnvironmentConfig {
             "$($_.Key)=$($_.Value)"
         }
 
-        # Ensure directory exists
-        $directory = Split-Path $envFile -Parent
-        if (-not (Test-Path $directory)) {
-            New-Item -ItemType Directory -Path $directory -Force | Out-Null
-        }
-
         # Write to file using UTF8 without BOM
         $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllText($envFile, ($envContent -join "`n"), $utf8NoBomEncoding)
 
         Write-Host "Updated environment configuration: $envFile" -ForegroundColor Green
-        
-        # Create symlink for default .env file if in Development
-        if ($Environment -eq "Development") {
-            $defaultEnvFile = Join-Path $script:CONFIG_PATH ".env"
-            if (Test-Path $defaultEnvFile) {
-                Remove-Item $defaultEnvFile -Force
-            }
-            
-            # Create symbolic link on Windows
-            if ($IsWindows) {
-                New-Item -ItemType SymbolicLink -Path $defaultEnvFile -Target $envFile -Force | Out-Null
-            } else {
-                # For non-Windows systems
-                ln -sf $envFile $defaultEnvFile
-            }
-            
-            Write-Host "Created symlink: $defaultEnvFile -> $envFile" -ForegroundColor Green
-        }
-
         return $true
     }
     catch {
         Write-Host "Failed to set environment configuration: $_" -ForegroundColor Red
-        Write-Host $_.ScriptStackTrace -ForegroundColor Red
         return $false
     }
 }

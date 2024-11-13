@@ -1,7 +1,4 @@
-# Remove version as it's now obsolete
-# version: '3.8'  # This line is removed
-
-name: insightops  # Add this for explicit naming
+name: insightops
 
 x-logging: &default-logging
   driver: "json-file"
