@@ -276,6 +276,120 @@ function Start-DockerServices {
     }
 }
 
+# Add this function to your existing DockerOperations.psm1
+# Location: D:\Users\Pradeep\Downloads\Grafana solution architect demo\GrafanaDemo\InsightOps\scripts\Modules\DockerOperations.psm1
+
+function Get-DetailedServiceLogs {
+    [CmdletBinding()]
+    param(
+        [string]$ConfigPath = $script:CONFIG_PATH
+    )
+
+    try {
+        $services = @(
+            @{Name = "Loki"; Container = "insightops_loki"; LogFile = "loki.log"},
+            @{Name = "Tempo"; Container = "insightops_tempo"; LogFile = "tempo.log"},
+            @{Name = "Grafana"; Container = "insightops_grafana"; LogFile = "grafana.log"},
+            @{Name = "Prometheus"; Container = "insightops_prometheus"; LogFile = "prometheus.log"},
+            @{Name = "Database"; Container = "insightops_db"; LogFile = "postgres.log"}
+        )
+
+        # Create logs directory if it doesn't exist
+        $logsPath = Join-Path $ConfigPath "logs"
+        if (-not (Test-Path $logsPath)) {
+            New-Item -ItemType Directory -Path $logsPath -Force | Out-Null
+            Write-Host "Created logs directory at: $logsPath" -ForegroundColor Green
+        }
+
+        foreach ($service in $services) {
+            Write-Host "`n========== $($service.Name) Logs ==========" -ForegroundColor Cyan
+            Write-Host "Container: $($service.Container)" -ForegroundColor Yellow
+            
+            # Get container status
+            $status = docker inspect --format='{{.State.Status}}' $service.Container 2>$null
+            $health = docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}N/A{{end}}' $service.Container 2>$null
+            Write-Host "Status: $status" -ForegroundColor Yellow
+            Write-Host "Health: $health" -ForegroundColor Yellow
+            
+            # Get and save recent logs
+            $logFilePath = Join-Path $logsPath $service.LogFile
+            Write-Host "`nSaving logs to: $logFilePath" -ForegroundColor Yellow
+            
+            # Get recent logs and save them
+            docker logs --tail 100 $service.Container 2>&1 | Out-File -FilePath $logFilePath -Encoding UTF8
+            Write-Host "Recent Logs:" -ForegroundColor Yellow
+            Get-Content $logFilePath | Select-Object -Last 20
+
+            # Get volume mounts
+            Write-Host "`nVolume Mounts:" -ForegroundColor Yellow
+            $mounts = docker inspect --format='{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}' $service.Container
+            $mounts | Write-Host
+
+            # Check permissions on host volume paths
+            Write-Host "`nChecking volume permissions:" -ForegroundColor Yellow
+            foreach ($mount in ($mounts -split "`n") | Where-Object { $_ }) {
+                $hostPath = ($mount -split " -> ")[0]
+                if (Test-Path $hostPath) {
+                    $acl = Get-Acl $hostPath
+                    Write-Host "Path: $hostPath"
+                    Write-Host "Permissions: $($acl.AccessToString)"
+                }
+            }
+
+            Write-Host "`nContainer Networks:" -ForegroundColor Yellow
+            docker inspect --format='{{range $net, $conf := .NetworkSettings.Networks}}{{$net}}{{println}}{{end}}' $service.Container
+
+            Write-Host "----------------------------------------`n"
+        }
+
+        Write-Host "Logs have been saved to: $logsPath" -ForegroundColor Green
+        Write-Host "You can find detailed logs for each service in the 'logs' directory."
+    }
+    catch {
+        Write-Error "Error getting service logs: $_"
+        Write-Error $_.ScriptStackTrace
+    }
+}
+
+# Also add this helper function for fixing permissions
+function Set-VolumePermissions {
+    [CmdletBinding()]
+    param()
+
+    try {
+        $volumes = @(
+            "loki_data",
+            "loki_wal",
+            "tempo_data",
+            "prometheus_data",
+            "grafana_data"
+        )
+
+        foreach ($vol in $volumes) {
+            $path = Join-Path $script:CONFIG_PATH $vol
+            if (Test-Path $path) {
+                $acl = Get-Acl $path
+                $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    "Everyone",
+                    "FullControl",
+                    "ContainerInherit,ObjectInherit",
+                    "None",
+                    "Allow"
+                )
+                $acl.SetAccessRule($rule)
+                Set-Acl -Path $path -AclObject $acl
+                Write-Host "Updated permissions for $path" -ForegroundColor Green
+            }
+            else {
+                Write-Warning "Volume path not found: $path"
+            }
+        }
+    }
+    catch {
+        Write-Error "Error setting volume permissions: $_"
+    }
+}
+
 function _Stop-DockerServices {
     [CmdletBinding()]
     param (
@@ -498,5 +612,7 @@ Export-ModuleMember -Function @(
     'Clean-DockerEnvironment',
     'Test-ContainerHealth',
     'Initialize-DockerEnvironment',
-    'Test-ServiceHealth'
+    'Test-ServiceHealth',
+    'Get-DetailedServiceLogs',     
+    'Set-VolumePermissions' 
 )

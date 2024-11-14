@@ -410,6 +410,8 @@ function Invoke-MenuChoice {
                 Write-Host "      Check service health (Option 10) to verify availability." -ForegroundColor Yellow
             }
 
+            "21" { Get-DetailedServiceLogs }  # Add this as a new menu option
+
             # Exit
             "0" { 
                 Write-Host "Exiting InsightOps Management Console..." -ForegroundColor Cyan
