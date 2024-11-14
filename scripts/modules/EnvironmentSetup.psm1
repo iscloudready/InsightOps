@@ -256,8 +256,11 @@ services:
     ports:
       - "${DB_PORT:-5433}:5432"
     healthcheck:
-      <<: *default-healthcheck
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-insightops_user} -d ${DB_NAME:-insightops_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     logging: *default-logging
 
   orderservice:
@@ -266,6 +269,7 @@ services:
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_orderservice
     environment:
+      - ASPNETCORE_ENVIRONMENT=Docker  # Set environment to Docker
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
     ports:
       - "${ORDERSERVICE_PORT:-7265}:80"
@@ -287,6 +291,7 @@ services:
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_inventoryservice
     environment:
+      - ASPNETCORE_ENVIRONMENT=Docker  # Set environment to Docker
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
     ports:
       - "${INVENTORYSERVICE_PORT:-7070}:80"
@@ -307,6 +312,8 @@ services:
       context: ./ApiGateway
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_apigateway
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker  # Set environment to Docker
     ports:
       - "${APIGATEWAY_PORT:-7237}:80" 
     depends_on:
@@ -326,6 +333,8 @@ services:
       context: ./Frontend
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_frontend
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker  # Set environment to Docker
     ports:
       - "${FRONTEND_PORT:-7144}:80"
     depends_on:

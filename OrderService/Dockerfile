@@ -1,12 +1,11 @@
-# See https://aka.ms/customizecontainer to learn how to customize your debug container and how Visual Studio uses this Dockerfile to build your images for faster debugging.
-
-# This stage is used when running from VS in fast mode (Default for Debug configuration)
+# OrderService Dockerfile
+# Base stage for running the application
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 ARG BUILD_CONFIGURATION=Release
 USER root
 WORKDIR /app
 EXPOSE 8080
-EXPOSE 8081
+#EXPOSE 8081
 
 # Install curl and wget for resource fetching and health checks
 RUN apt-get update \
@@ -14,23 +13,27 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# This stage is used to build the service project
+# Switch to a non-root user after installing necessary packages for security
+RUN useradd -m appuser && chown -R appuser /app
+USER appuser
+
+# Build stage
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
-COPY ["ApiGateway.csproj", "."]
-RUN dotnet restore "./ApiGateway.csproj"
+COPY ["OrderService.csproj", "."]
+RUN dotnet restore "./OrderService.csproj"
 COPY . .
 WORKDIR "/src/."
-RUN dotnet build "./ApiGateway.csproj" -c $BUILD_CONFIGURATION -o /app/build
+RUN dotnet build "./OrderService.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
-# This stage is used to publish the service project to be copied to the final stage
+# Publish stage
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./ApiGateway.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "./OrderService.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
 
-# This stage is used in production or when running from VS in regular mode (Default when not using the Debug configuration)
+# Final stage for running the application
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
-ENTRYPOINT ["dotnet", "ApiGateway.dll"]
+ENTRYPOINT ["dotnet", "OrderService.dll"]

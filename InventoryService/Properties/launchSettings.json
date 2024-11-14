@@ -8,6 +8,13 @@
       "sslPort": 44382
     }
   },
+  "Kestrel": {
+    "Endpoints": {
+      "Http": {
+        "Url": "http://*:80"
+      }
+    }
+  },
   "profiles": {
     "http": {
       "commandName": "Project",
