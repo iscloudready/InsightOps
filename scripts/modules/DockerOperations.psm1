@@ -282,19 +282,44 @@ function Start-DockerServices {
 function Get-DetailedServiceLogs {
     [CmdletBinding()]
     param(
-        [string]$ConfigPath = $script:CONFIG_PATH
+        [string]$ConfigPath = $script:CONFIG_PATH,
+        [int]$LogLines = 20
     )
 
     try {
         $services = @(
-            @{Name = "Loki"; Container = "insightops_loki"; LogFile = "loki.log"},
-            @{Name = "Tempo"; Container = "insightops_tempo"; LogFile = "tempo.log"},
-            @{Name = "Grafana"; Container = "insightops_grafana"; LogFile = "grafana.log"},
-            @{Name = "Prometheus"; Container = "insightops_prometheus"; LogFile = "prometheus.log"},
-            @{Name = "Database"; Container = "insightops_db"; LogFile = "postgres.log"}
+            @{
+                Name = "Loki"
+                Container = "insightops_loki"
+                LogFile = "loki.log"
+                HealthEndpoint = "http://localhost:3101/ready"
+            },
+            @{
+                Name = "Tempo"
+                Container = "insightops_tempo"
+                LogFile = "tempo.log"
+                HealthEndpoint = "http://localhost:3200/ready"
+            },
+            @{
+                Name = "Grafana"
+                Container = "insightops_grafana"
+                LogFile = "grafana.log"
+                HealthEndpoint = "http://localhost:3001/api/health"
+            },
+            @{
+                Name = "Prometheus"
+                Container = "insightops_prometheus"
+                LogFile = "prometheus.log"
+                HealthEndpoint = "http://localhost:9091/-/healthy"
+            },
+            @{
+                Name = "Database"
+                Container = "insightops_db"
+                LogFile = "postgres.log"
+                HealthEndpoint = $null  # PostgreSQL uses a different health check mechanism
+            }
         )
 
-        # Create logs directory if it doesn't exist
         $logsPath = Join-Path $ConfigPath "logs"
         if (-not (Test-Path $logsPath)) {
             New-Item -ItemType Directory -Path $logsPath -Force | Out-Null
@@ -305,45 +330,43 @@ function Get-DetailedServiceLogs {
             Write-Host "`n========== $($service.Name) Logs ==========" -ForegroundColor Cyan
             Write-Host "Container: $($service.Container)" -ForegroundColor Yellow
             
-            # Get container status
-            $status = docker inspect --format='{{.State.Status}}' $service.Container 2>$null
-            $health = docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}N/A{{end}}' $service.Container 2>$null
+            # Get container details
+            $details = docker inspect $service.Container 2>$null | ConvertFrom-Json
+            $status = $details.State.Status
+            $health = $details.State.Health.Status
+            $startTime = $details.State.StartedAt
+            
             Write-Host "Status: $status" -ForegroundColor Yellow
             Write-Host "Health: $health" -ForegroundColor Yellow
-            
-            # Get and save recent logs
+            Write-Host "Started At: $startTime" -ForegroundColor Yellow
+
+            # Get and save logs
             $logFilePath = Join-Path $logsPath $service.LogFile
-            Write-Host "`nSaving logs to: $logFilePath" -ForegroundColor Yellow
+            docker logs --tail $LogLines $service.Container 2>&1 | Out-File -FilePath $logFilePath -Encoding UTF8
             
-            # Get recent logs and save them
-            docker logs --tail 100 $service.Container 2>&1 | Out-File -FilePath $logFilePath -Encoding UTF8
-            Write-Host "Recent Logs:" -ForegroundColor Yellow
-            Get-Content $logFilePath | Select-Object -Last 20
-
-            # Get volume mounts
-            Write-Host "`nVolume Mounts:" -ForegroundColor Yellow
-            $mounts = docker inspect --format='{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}' $service.Container
-            $mounts | Write-Host
-
-            # Check permissions on host volume paths
-            Write-Host "`nChecking volume permissions:" -ForegroundColor Yellow
-            foreach ($mount in ($mounts -split "`n") | Where-Object { $_ }) {
-                $hostPath = ($mount -split " -> ")[0]
-                if (Test-Path $hostPath) {
-                    $acl = Get-Acl $hostPath
-                    Write-Host "Path: $hostPath"
-                    Write-Host "Permissions: $($acl.AccessToString)"
-                }
+            Write-Host "`nRecent Logs:" -ForegroundColor Yellow
+            $logs = Get-Content $logFilePath -Tail $LogLines
+            if ($logs) {
+                $logs | ForEach-Object { Write-Host $_ -ForegroundColor Gray }
+            } else {
+                Write-Host "No recent logs found" -ForegroundColor Yellow
             }
 
-            Write-Host "`nContainer Networks:" -ForegroundColor Yellow
-            docker inspect --format='{{range $net, $conf := .NetworkSettings.Networks}}{{$net}}{{println}}{{end}}' $service.Container
+            # Check HTTP health endpoint if available
+            if ($service.HealthEndpoint) {
+                Write-Host "`nHealth Check:" -ForegroundColor Yellow
+                try {
+                    $response = Invoke-WebRequest -Uri $service.HealthEndpoint -Method GET -TimeoutSec 5
+                    Write-Host "Health endpoint ($($service.HealthEndpoint)) status: $($response.StatusCode)" -ForegroundColor Green
+                } catch {
+                    Write-Host "Health endpoint ($($service.HealthEndpoint)) failed: $_" -ForegroundColor Red
+                }
+            }
 
             Write-Host "----------------------------------------`n"
         }
 
-        Write-Host "Logs have been saved to: $logsPath" -ForegroundColor Green
-        Write-Host "You can find detailed logs for each service in the 'logs' directory."
+        Write-Host "Detailed logs have been saved to: $logsPath" -ForegroundColor Green
     }
     catch {
         Write-Error "Error getting service logs: $_"
@@ -600,6 +623,104 @@ function Wait-ServiceHealth {
     }
 }
 
+function Initialize-GrafanaDashboards {
+    [CmdletBinding()]
+    param(
+        [string]$ConfigPath = $script:CONFIG_PATH
+    )
+
+    try {
+        # Create required Grafana directories
+        $grafanaPath = Join-Path $ConfigPath "grafana"
+        $directories = @(
+            (Join-Path $grafanaPath "provisioning"),
+            (Join-Path $grafanaPath "provisioning/dashboards"),
+            (Join-Path $grafanaPath "provisioning/datasources"),
+            (Join-Path $grafanaPath "dashboards")
+        )
+
+        foreach ($dir in $directories) {
+            if (-not (Test-Path $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+                Write-Host "Created directory: $dir" -ForegroundColor Green
+            }
+        }
+
+        # Create dashboard provisioning config
+        $dashboardConfig = @'
+apiVersion: 1
+providers:
+  - name: 'InsightOps'
+    orgId: 1
+    folder: 'InsightOps'
+    folderUid: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: true
+'@
+
+        $dashboardProvisionPath = Join-Path $grafanaPath "provisioning/dashboards/dashboards.yaml"
+        Set-Content -Path $dashboardProvisionPath -Value $dashboardConfig -Encoding UTF8
+
+        # Create datasource provisioning config
+        $datasourceConfig = @'
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      httpMethod: GET
+      serviceMap:
+        datasourceUid: prometheus
+'@
+
+        $datasourceProvisionPath = Join-Path $grafanaPath "provisioning/datasources/datasources.yaml"
+        Set-Content -Path $datasourceProvisionPath -Value $datasourceConfig -Encoding UTF8
+
+        # Create a sample dashboard
+        $sampleDashboard = @'
+{
+  "annotations": {
+    "list": []
+  },
+  "title": "InsightOps Overview",
+  "uid": "insightops-overview",
+  "version": 1,
+  "panels": []
+}
+'@
+
+        $dashboardPath = Join-Path $grafanaPath "dashboards/overview.json"
+        Set-Content -Path $dashboardPath -Value $sampleDashboard -Encoding UTF8
+
+        Write-Host "Grafana configurations created successfully" -ForegroundColor Green
+        Write-Host "You'll need to restart Grafana for these changes to take effect" -ForegroundColor Yellow
+
+        return $true
+    }
+    catch {
+        Write-Error "Failed to initialize Grafana configurations: $_"
+        return $false
+    }
+}
+
 # Export functions
 Export-ModuleMember -Function @(
     'Show-DockerStatus',
@@ -614,5 +735,6 @@ Export-ModuleMember -Function @(
     'Initialize-DockerEnvironment',
     'Test-ServiceHealth',
     'Get-DetailedServiceLogs',     
-    'Set-VolumePermissions' 
+    'Set-VolumePermissions',
+    'Initialize-GrafanaDashboards'
 )

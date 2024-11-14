@@ -186,14 +186,17 @@ usage_report:
     GrafanaDashboard = @'
 apiVersion: 1
 providers:
-- name: 'InsightOps'
-  orgId: 1
-  folder: 'InsightOps'
-  type: file
-  disableDeletion: false
-  editable: true
-  options:
-    path: /etc/grafana/dashboards
+  - name: 'InsightOps'
+    orgId: 1
+    folder: 'InsightOps'
+    folderUid: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: true
 '@
 
     GrafanaDatasource = @'
@@ -263,9 +266,13 @@ services:
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-InsightOps2024!}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/overview.json
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
     ports:
       - "${GRAFANA_PORT:-3001}:3000"
     healthcheck:
@@ -497,10 +504,10 @@ function Initialize-Environment {
         # Manually create paths for Docker permissions
         Write-Info "Setting Docker permissions for data directories..."
         $dockerPaths = @(
-            Join-Path -Path $script:CONFIG_PATH -ChildPath "postgres_data";
-            Join-Path -Path $script:CONFIG_PATH -ChildPath "grafana_data";
-            Join-Path -Path $script:CONFIG_PATH -ChildPath "prometheus_data";
-            Join-Path -Path $script:CONFIG_PATH -ChildPath "loki_data";
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "postgres_data"
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "grafana_data"
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "prometheus_data"
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "loki_data"
             Join-Path -Path $script:CONFIG_PATH -ChildPath "tempo_data"
         )
         Ensure-DockerPermissions -Paths $dockerPaths
@@ -527,9 +534,9 @@ function Initialize-Environment {
         Write-Info "`nSetting up configuration files:"
         # Define configuration files with paths and ensure they're joined correctly
         $configs = @(
-            @{Key = "tempo/tempo.yaml"; Value = Get-TempoConfig},
-            @{Key = "loki/loki-config.yaml"; Value = Get-LokiConfig},
-            @{Key = "prometheus/prometheus.yml"; Value = Get-PrometheusConfig},
+            @{Key = "tempo/tempo.yaml"; Value = Get-TempoConfig}
+            @{Key = "loki/loki-config.yaml"; Value = Get-LokiConfig}
+            @{Key = "prometheus/prometheus.yml"; Value = Get-PrometheusConfig}
             @{Key = "docker-compose.yml"; Value = Get-DockerComposeConfig}
         )
 
@@ -557,6 +564,221 @@ function Initialize-Environment {
             Write-Success "  [OK] Created .env.$Environment"
         }
 
+        Write-Info "`nInitializing Grafana configurations..."
+
+        # Create Grafana directory structure
+        $grafanaPath = Join-Path $script:CONFIG_PATH "grafana"
+        $grafanaDirs = @(
+            "$grafanaPath\provisioning\dashboards"
+            "$grafanaPath\provisioning\datasources"
+            "$grafanaPath\dashboards"
+        )
+
+        # Create directories if they don't exist
+        foreach ($dir in $grafanaDirs) {
+            if (-not (Test-Path $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+                Write-Success "  [Created] Grafana directory: $($dir.Split('\')[-1])"
+            } else {
+                Write-Info "  [Exists] Grafana directory: $($dir.Split('\')[-1])"
+            }
+        }
+$dashboardProvisionConfig = @'
+apiVersion: 1
+providers:
+  - name: 'InsightOps'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards
+'@
+
+$datasourceConfig = @'
+apiVersion: 1
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+  - name: Loki
+    orgId: 1
+  - name: Tempo
+    orgId: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    version: 1
+    editable: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: "5s"
+      
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    version: 1
+    editable: true
+    jsonData:
+      maxLines: 1000
+      
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    version: 1
+    editable: true
+    jsonData:
+      httpMethod: GET
+      serviceMap:
+        datasourceUid: prometheus
+'@
+
+$sampleDashboard = @'
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "up",
+          "refId": "A"
+        }
+      ],
+      "title": "Service Status",
+      "type": "stat"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["insightops"],
+  "title": "InsightOps Overview",
+  "uid": "insightops-status",
+  "version": 1
+}
+'@
+
+        # And update how we write the files:
+        $grafanaConfigs = @{
+            "$grafanaPath\provisioning\dashboards\dashboards.yaml" = $dashboardProvisionConfig
+            "$grafanaPath\provisioning\datasources\datasources.yaml" = $datasourceConfig
+            "$grafanaPath\dashboards\overview.json" = $sampleDashboard
+        }
+
+        # First clean existing files
+        Get-ChildItem -Path $grafanaPath -Recurse -File | Remove-Item -Force
+
+        # Then write new files
+        foreach ($config in $grafanaConfigs.GetEnumerator()) {
+            try {
+                $directory = Split-Path -Parent $config.Key
+                if (-not (Test-Path $directory)) {
+                    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+                }
+
+                $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
+                [System.IO.File]::WriteAllText($config.Key, $config.Value, $utf8NoBomEncoding)
+                Write-Success "  [Created] $($config.Key.Split('\')[-1])"
+            }
+            catch {
+                Write-Warning "Failed to create $($config.Key): $_"
+            }
+        }
+
+        # Create alerting directory to prevent warnings
+        $alertingPath = "$grafanaPath\provisioning\alerting"
+        if (-not (Test-Path $alertingPath)) {
+            New-Item -ItemType Directory -Path $alertingPath -Force | Out-Null
+            Write-Success "  [Created] Alerting directory"
+        }
+
+        # Set read permissions on Grafana files
+        Get-ChildItem -Path $grafanaPath -Recurse | ForEach-Object {
+            try {
+                $acl = Get-Acl -Path $_.FullName
+                $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    "Everyone",
+                    "Read",
+                    "None",
+                    "None",
+                    "Allow"
+                )
+                $acl.AddAccessRule($accessRule)
+                Set-Acl -Path $_.FullName -AclObject $acl
+            }
+            catch {
+                Write-Warning "Failed to set permissions for $($_.FullName): $_"
+            }
+        }
+
+        Write-Success "`nGrafana initialization completed successfully"
         Write-Success "`nEnvironment initialization completed successfully"
         return $true
     }
