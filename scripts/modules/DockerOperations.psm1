@@ -30,37 +30,12 @@ function Initialize-DockerEnvironment {
     }
 }
 
-# Modify existing functions to use DOCKER_COMPOSE_FILE
 function Show-DockerStatus {
     [CmdletBinding()]
     param()
     
     try {
         if (-not (Initialize-DockerEnvironment)) {
-            return $false
-        }
-
-        Write-Information "Current Docker container status:"
-        docker-compose -f $script:DOCKER_COMPOSE_FILE ps
-
-        Write-Information "`nResource usage:"
-        docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}"
-        return $true
-    }
-    catch {
-        Write-Error "Failed to show Docker status: $_"
-        return $false
-    }
-}
-
-# Modify the docker-compose commands to use the config file path
-function Show-DockerStatus {
-    [CmdletBinding()]
-    param()
-    
-    try {
-        if (-not (Test-Path $script:DOCKER_COMPOSE_PATH)) {
-            Write-Error "Docker Compose configuration not found at: $script:DOCKER_COMPOSE_PATH"
             return $false
         }
 
@@ -79,78 +54,131 @@ function Show-DockerStatus {
 
 function Test-ServiceHealth {
     [CmdletBinding()]
-    param(
+    param (
         [Parameter(Mandatory = $false)]
-        [string]$ServiceName
+        [string]$ServiceName,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$ProjectPrefix = "insightops"
     )
     
     try {
         Write-Host "`nChecking service health..." -ForegroundColor Cyan
         
-        # Get all containers status
-        $runningContainers = docker ps --format "{{.Names}}" 2>$null
-        $allContainers = docker ps -a --format "{{.Names}}|{{.Status}}" 2>$null
-
         $services = @{
-            "insightops_db" = "Database"
-            "insightops_frontend" = "Frontend"
-            "insightops_gateway" = "API Gateway"
-            "insightops_orders" = "Order Service"
-            "insightops_inventory" = "Inventory Service"
-            "insightops_tempo" = "Tempo"
-            "insightops_grafana" = "Grafana"
-            "insightops_loki" = "Loki"
-            "insightops_prometheus" = "Prometheus"
+            "db" = @{
+                Name = "Database"
+                HealthCheck = "pg_isready"
+            }
+            "grafana" = @{
+                Name = "Grafana"
+                Port = 3001
+            }
+            "prometheus" = @{
+                Name = "Prometheus"
+                Port = 9091
+            }
+            "loki" = @{
+                Name = "Loki"
+                Port = 3101
+            }
+            "tempo" = @{
+                Name = "Tempo"
+                Port = 4317
+            }
         }
 
-        foreach ($container in $services.Keys) {
-            $serviceName = $services[$container]
-            $containerStatus = $allContainers | Where-Object { $_ -like "$container|*" }
+        $results = @()
+        foreach ($svc in $services.GetEnumerator()) {
+            $containerName = "${ProjectPrefix}_$($svc.Key)"
             
-            if ($containerStatus) {
-                $status = $containerStatus.Split('|')[1]
-                if ($status -like "Up*") {
-                    $health = docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}running{{end}}' $container 2>$null
-                    Write-Host "  • $serviceName : $health" -ForegroundColor $(
-                        switch ($health) {
-                            "healthy" { "Green" }
-                            "unhealthy" { "Red" }
-                            "running" { "Green" }
-                            default { "Yellow" }
-                        }
-                    )
-                }
-                elseif ($status -like "Exited*") {
-                    $exitInfo = docker inspect --format='{{.State.ExitCode}}' $container 2>$null
-                    Write-Host "  • $serviceName : Exited (code: $exitInfo)" -ForegroundColor Red
-                }
-                else {
-                    Write-Host "  • $serviceName : $status" -ForegroundColor Yellow
-                }
+            # Skip if specific service requested and this isn't it
+            if ($ServiceName -and $containerName -notlike "*$ServiceName*") {
+                continue
             }
-            else {
-                Write-Host "  • $serviceName : not found" -ForegroundColor Red
+
+            $status = docker ps -a --filter "name=$containerName" --format "{{.Status}}"
+            $health = docker inspect --format='{{.State.Health.Status}}' $containerName 2>$null
+            $ipAddress = docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $containerName 2>$null
+            $ports = docker port $containerName 2>$null
+
+            $results += [PSCustomObject]@{
+                Service = $svc.Value.Name
+                Container = $containerName
+                Status = if ($status -like "Up*") { "Running" } else { "Stopped" }
+                Health = if ($health) { $health } else { "N/A" }
+                IP = $ipAddress
+                Ports = ($ports -join ", ")
+                Uptime = $status
             }
         }
 
-        Write-Host "`nTroubleshooting Tips:" -ForegroundColor Yellow
-        Write-Host "  1. View service logs: Option 15" -ForegroundColor Yellow
-        Write-Host "  2. Check container details: Option 11" -ForegroundColor Yellow
-        Write-Host "  3. Restart services if needed: Option 8" -ForegroundColor Yellow
+        if ($results.Count -gt 0) {
+            Write-Host "`nService Health Status:" -ForegroundColor Cyan
+            Write-Host "===========================================" -ForegroundColor Cyan
+            
+            foreach ($result in $results) {
+                $statusColor = switch ($result.Status) {
+                    "Running" { "Green" }
+                    "Stopped" { "Red" }
+                    default { "Yellow" }
+                }
+                
+                $healthColor = switch ($result.Health) {
+                    "healthy" { "Green" }
+                    "unhealthy" { "Red" }
+                    "starting" { "Yellow" }
+                    default { "Gray" }
+                }
+
+                Write-Host "`nService: " -NoNewline -ForegroundColor Cyan
+                Write-Host $result.Service -ForegroundColor White
+                Write-Host "Container: " -NoNewline -ForegroundColor Cyan
+                Write-Host $result.Container -ForegroundColor White
+                Write-Host "Status: " -NoNewline -ForegroundColor Cyan
+                Write-Host $result.Status -ForegroundColor $statusColor
+                Write-Host "Health: " -NoNewline -ForegroundColor Cyan
+                Write-Host $result.Health -ForegroundColor $healthColor
+                Write-Host "IP Address: " -NoNewline -ForegroundColor Cyan
+                Write-Host $result.IP -ForegroundColor White
+                Write-Host "Ports: " -NoNewline -ForegroundColor Cyan
+                Write-Host $result.Ports -ForegroundColor White
+                Write-Host "Uptime: " -NoNewline -ForegroundColor Cyan
+                Write-Host $result.Uptime -ForegroundColor White
+                Write-Host "-------------------------------------------" -ForegroundColor Gray
+            }
+
+            return $true
+        } else {
+            Write-Host "`nNo services found matching pattern: $ServiceName" -ForegroundColor Yellow
+            return $false
+        }
+
+        try {
+            Write-Host "`nChecking service health..." -ForegroundColor Cyan
         
-        return $true
+            # Special handling for Tempo volume check
+            if ($ServiceName -eq "tempo" -or -not $ServiceName) {
+                $tempoVolume = docker volume ls --format "{{.Name}}" | Where-Object { $_ -like "*tempo*" }
+                if ($tempoVolume) {
+                    Write-Host "Tempo volume exists: $tempoVolume" -ForegroundColor Green
+                } else {
+                    Write-Host "Tempo volume not found" -ForegroundColor Yellow
+                }
+            }
+
+            # Rest of your existing health check code...
+        }
+        catch {
+            Write-Host "Health check failed: $_" -ForegroundColor Red
+            return $false
+        }
     }
     catch {
-        Write-Host "Health check failed: $_" -ForegroundColor Red
+        Write-Host "`nError checking service health: $_" -ForegroundColor Red
         return $false
     }
 }
-
-# Define common logging functions to match Logging module
-function Write-Information { param([string]$Message) Write-Host $Message -ForegroundColor Cyan }
-function Write-Success { param([string]$Message) Write-Host $Message -ForegroundColor Green }
-function Write-Warning { param([string]$Message) Write-Host $Message -ForegroundColor Yellow }
-function Write-Error { param([string]$Message) Write-Host $Message -ForegroundColor Red }
 
 function Start-DockerServices {
     [CmdletBinding()]
@@ -159,46 +187,24 @@ function Start-DockerServices {
     try {
         Write-Host "`nStarting Docker services..." -ForegroundColor Cyan
 
-        # Use DOCKER_COMPOSE_PATH instead of CONFIG_PATH
         if (-not (Test-Path $script:DOCKER_COMPOSE_PATH)) {
             throw "Docker Compose file not found at: $script:DOCKER_COMPOSE_PATH"
         }
 
-        Write-Host "Using compose file: $script:DOCKER_COMPOSE_PATH" -ForegroundColor Yellow
+        docker-compose -f $script:DOCKER_COMPOSE_PATH up -d
 
-        # Change to the configuration directory
-        $configDir = Split-Path $script:DOCKER_COMPOSE_PATH -Parent
-        $currentLocation = Get-Location
-        Set-Location $configDir
+        Write-Host "`nContainer Status:" -ForegroundColor Cyan
+        docker-compose -f $script:DOCKER_COMPOSE_PATH ps
 
-        try {
-            # Start the services
-            Write-Host "Starting containers..." -ForegroundColor Yellow
-            docker-compose -f $script:DOCKER_COMPOSE_PATH up -d
-
-            # Show status
-            Write-Host "`nContainer Status:" -ForegroundColor Cyan
-            docker-compose -f $script:DOCKER_COMPOSE_PATH ps
-
-            Write-Host "`nServices started successfully" -ForegroundColor Green
-            Write-Host "Use Option 10 to check service health" -ForegroundColor Yellow
-            Write-Host "Use Option 20 to open service URLs" -ForegroundColor Yellow
-        }
-        finally {
-            # Restore original location
-            Set-Location $currentLocation
-        }
-        
+        Write-Host "`nServices started successfully" -ForegroundColor Green
         return $true
     }
     catch {
-        Write-Host "Failed to start services: $_" -ForegroundColor Red
-        Write-Host "Location: $(Get-Location)" -ForegroundColor Yellow  # Debug info
+        Write-Error "Failed to start services: $_"
         return $false
     }
 }
 
-# Also update Stop-DockerServices to use the correct path
 function Stop-DockerServices {
     [CmdletBinding()]
     param (
@@ -212,23 +218,14 @@ function Stop-DockerServices {
             throw "Docker Compose configuration not found at: $script:DOCKER_COMPOSE_PATH"
         }
 
-        $configDir = Split-Path $script:DOCKER_COMPOSE_PATH -Parent
-        $currentLocation = Get-Location
-        Set-Location $configDir
-
-        try {
-            if ($RemoveVolumes) {
-                docker-compose -f $script:DOCKER_COMPOSE_PATH down -v --remove-orphans
-            }
-            else {
-                docker-compose -f $script:DOCKER_COMPOSE_PATH down --remove-orphans
-            }
-            Write-Success "Docker services stopped successfully"
+        if ($RemoveVolumes) {
+            docker-compose -f $script:DOCKER_COMPOSE_PATH down -v --remove-orphans
         }
-        finally {
-            Set-Location $currentLocation
+        else {
+            docker-compose -f $script:DOCKER_COMPOSE_PATH down --remove-orphans
         }
         
+        Write-Success "Docker services stopped successfully"
         return $true
     }
     catch {
@@ -246,7 +243,7 @@ function Restart-DockerService {
     
     try {
         Write-Information "Restarting Docker service: $ServiceName"
-        docker-compose restart $ServiceName
+        docker-compose -f $script:DOCKER_COMPOSE_PATH restart $ServiceName
         Write-Success "Service $ServiceName restarted successfully"
         return $true
     }
@@ -263,17 +260,8 @@ function Get-ContainerLogs {
     )
     
     try {
-        $containerExists = docker ps -a --format "{{.Names}}" | Where-Object { $_ -eq $ContainerName }
-        if (-not $containerExists) {
-            Write-Host "Container $ContainerName not found" -ForegroundColor Red
-            return $false
-        }
-
         Write-Host "`nLogs for container $ContainerName" -ForegroundColor Cyan
-        Write-Host "-----------------------------------------" -ForegroundColor Gray
         docker logs $ContainerName 2>&1
-        Write-Host "-----------------------------------------" -ForegroundColor Gray
-        
         return $true
     }
     catch {
@@ -294,7 +282,6 @@ function Export-DockerLogs {
         }
         else {
             Write-Host "`nGetting logs for all services..." -ForegroundColor Cyan
-            
             $containers = docker ps -a --format "{{.Names}}"
             foreach ($container in $containers) {
                 Get-ContainerLogs -ContainerName $container
@@ -304,78 +291,6 @@ function Export-DockerLogs {
     }
     catch {
         Write-Host "Failed to get logs: $_" -ForegroundColor Red
-        return $false
-    }
-}
-
-function Wait-ServiceHealth {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$ServiceName,
-        [int]$TimeoutSeconds = 30
-    )
-    
-    try {
-        $startTime = Get-Date
-        $timeout = $startTime.AddSeconds($TimeoutSeconds)
-        
-        Write-Information "Waiting for $ServiceName to be healthy..."
-        while ((Get-Date) -lt $timeout) {
-            $status = docker inspect --format='{{.State.Health.Status}}' $ServiceName 2>$null
-            if ($status -eq 'healthy') {
-                Write-Success "$ServiceName is healthy"
-                return $true
-            }
-            Start-Sleep -Seconds 2
-        }
-        
-        Write-Warning "$ServiceName did not become healthy within $TimeoutSeconds seconds"
-        return $false
-    }
-    catch {
-        Write-Error "Error checking service health: $_"
-        return $false
-    }
-}
-
-function Clean-DockerEnvironment {
-    [CmdletBinding()]
-    param (
-        [switch]$RemoveVolumes,
-        [switch]$RemoveImages,
-        [switch]$Force
-    )
-    
-    try {
-        Write-Information "Cleaning Docker environment..."
-        
-        # Stop all containers first
-        Stop-DockerServices -RemoveVolumes:$RemoveVolumes
-        
-        if ($RemoveImages) {
-            Write-Information "Removing all Docker images..."
-            if ($Force) {
-                docker system prune -af
-            }
-            else {
-                docker system prune -a
-            }
-        }
-        else {
-            if ($Force) {
-                docker system prune -f
-            }
-            else {
-                docker system prune
-            }
-        }
-        
-        Write-Success "Docker environment cleaned successfully"
-        return $true
-    }
-    catch {
-        Write-Error "Failed to clean Docker environment: $_"
         return $false
     }
 }
@@ -425,6 +340,77 @@ function Test-ContainerHealth {
     }
 }
 
+function Clean-DockerEnvironment {
+    [CmdletBinding()]
+    param (
+        [switch]$RemoveVolumes,
+        [switch]$RemoveImages,
+        [switch]$Force
+    )
+    
+    try {
+        Write-Information "Cleaning Docker environment..."
+        
+        Stop-DockerServices -RemoveVolumes:$RemoveVolumes
+        
+        if ($RemoveImages) {
+            Write-Information "Removing all Docker images..."
+            if ($Force) {
+                docker system prune -af
+            }
+            else {
+                docker system prune -a
+            }
+        }
+        else {
+            if ($Force) {
+                docker system prune -f
+            }
+            else {
+                docker system prune
+            }
+        }
+        
+        Write-Success "Docker environment cleaned successfully"
+        return $true
+    }
+    catch {
+        Write-Error "Failed to clean Docker environment: $_"
+        return $false
+    }
+}
+
+function Wait-ServiceHealth {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$ServiceName,
+        [int]$TimeoutSeconds = 30
+    )
+    
+    try {
+        $startTime = Get-Date
+        $timeout = $startTime.AddSeconds($TimeoutSeconds)
+        
+        Write-Information "Waiting for $ServiceName to be healthy..."
+        while ((Get-Date) -lt $timeout) {
+            $status = docker inspect --format='{{.State.Health.Status}}' $ServiceName 2>$null
+            if ($status -eq 'healthy') {
+                Write-Success "$ServiceName is healthy"
+                return $true
+            }
+            Start-Sleep -Seconds 2
+        }
+        
+        Write-Warning "$ServiceName did not become healthy within $TimeoutSeconds seconds"
+        return $false
+    }
+    catch {
+        Write-Error "Error checking service health: $_"
+        return $false
+    }
+}
+
 # Export functions
 Export-ModuleMember -Function @(
     'Show-DockerStatus',
@@ -435,8 +421,7 @@ Export-ModuleMember -Function @(
     'Get-ContainerLogs',
     'Wait-ServiceHealth',
     'Clean-DockerEnvironment',
-	'Test-ContainerHealth',
-	'Initialize-DockerEnvironment',
     'Test-ContainerHealth',
-    'Test-ServiceHealth' 
+    'Initialize-DockerEnvironment',
+    'Test-ServiceHealth'
 )

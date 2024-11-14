@@ -21,10 +21,7 @@ compactor:
 storage:
   trace:
     backend: local
-    local:
-      path: /tmp/tempo/blocks
-    wal:
-      path: /tmp/tempo/wal
+    path: /tmp/tempo
 
 metrics_generator:
   storage:

@@ -79,15 +79,14 @@ services:
       - TEMPO_LOG_LEVEL=debug
     volumes:
       - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
-      - tempo_data:/tmp/tempo
+      - tempo_data:/tmp/tempo  # Mount path for tempo_data
     ports:
       - "4317:4317"
       - "4318:4318"
       - "3200:3200"
     healthcheck:
-      <<: *default-healthcheck
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
-      start_period: 45s
+      start_period: 60s
     logging: *default-logging
     restart: unless-stopped
 

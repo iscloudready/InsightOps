@@ -108,9 +108,13 @@ $script:SERVICES = @{
         Ports = @{
             OTLP = "4317:4317"
             HTTP = "4318:4318"
-            Query = "3200:3200"
+            UI = "3200:3200"
         }
         HealthCheck = "wget --no-verbose --tries=1 --spider http://localhost:3200/ready"
+        Volumes = @{
+            Config = "/etc/tempo/tempo.yaml"
+            Data = "/var/tempo"  # Updated from /tmp/tempo
+        }
     }
 }
 
@@ -162,6 +166,132 @@ function Test-Configuration {
     }
 }
 
+function Test-RequiredPath {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [string]$Description = ""
+    )
+    try {
+        if (-not (Test-Path $Path)) {
+            New-Item -ItemType Directory -Path $Path -Force | Out-Null
+            Write-Host "  Created directory: $Description$(Split-Path $Path -Leaf)" -ForegroundColor Green
+        }
+        return $true
+    }
+    catch {
+        Write-Host "  Failed to create directory: $Description$(Split-Path $Path -Leaf)" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Permission management
+function Set-DirectoryPermissions {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+    try {
+        $acl = Get-Acl -Path $Path
+        $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            "Everyone",
+            "FullControl",
+            "ContainerInherit,ObjectInherit",
+            "None",
+            "Allow"
+        )
+        $acl.SetAccessRule($accessRule)
+        Set-Acl -Path $Path -AclObject $acl
+        Write-Host "  Set permissions for: $(Split-Path $Path -Leaf)" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Host "  Failed to set permissions for: $(Split-Path $Path -Leaf)" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Tempo specific directory initialization
+function Initialize-TempoDirectories {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$TempoPath
+    )
+    try {
+        $subDirs = @(
+            "blocks",
+            "wal",
+            (Join-Path "generator" "wal")
+        )
+
+        foreach ($subDir in $subDirs) {
+            $fullPath = Join-Path $TempoPath $subDir
+            if (Test-RequiredPath -Path $fullPath -Description "tempo/") {
+                if (-not (Set-DirectoryPermissions -Path $fullPath)) {
+                    throw "Failed to set permissions for $subDir"
+                }
+            }
+        }
+        return $true
+    }
+    catch {
+        Write-Host "  Failed to initialize Tempo directories: $_" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Volume access verification
+function Test-TempoVolumeAccess {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$VolumePath
+    )
+    try {
+        Write-Host "  Testing Tempo volume access..." -ForegroundColor Yellow
+        $testResult = docker run --rm `
+            -v "${VolumePath}:/tempo-test" `
+            alpine sh -c "touch /tempo-test/test && echo 'success'"
+        
+        if ($testResult -eq "success") {
+            Write-Host "  Tempo volume access verified" -ForegroundColor Green
+            return $true
+        }
+        Write-Host "  Tempo volume access test failed" -ForegroundColor Red
+        return $false
+    }
+    catch {
+        Write-Host "  Failed to verify Tempo volume access: $_" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Configuration file creation
+function New-ConfigurationFile {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Content,
+        [string]$Description = ""
+    )
+    try {
+        $directory = Split-Path -Path $Path -Parent
+        if (-not (Test-Path $directory)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+
+        $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBomEncoding)
+        Write-Host "  Created file: $Description$(Split-Path $Path -Leaf)" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Host "  Failed to create file: $Description$(Split-Path $Path -Leaf)" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Main initialization function
 function Initialize-DefaultConfigurations {
     [CmdletBinding()]
     param()
@@ -169,15 +299,20 @@ function Initialize-DefaultConfigurations {
     try {
         Write-Host "`nInitializing configurations in: $script:CONFIG_PATH" -ForegroundColor Cyan
 
-        # Create directories
+        # Create base directories
         foreach ($dir in $script:REQUIRED_PATHS) {
-            if (-not (Test-Path $dir)) {
-                New-Item -ItemType Directory -Path $dir -Force | Out-Null
-                Write-Host "  Created directory: $(Split-Path $dir -Leaf)" -ForegroundColor Green
+            if (-not (Test-RequiredPath -Path $dir)) {
+                throw "Failed to create required directory"
             }
         }
 
-        # Create files
+        # Initialize Tempo directories
+        $tempoPath = Join-Path $script:CONFIG_PATH "tempo"
+        if (-not (Initialize-TempoDirectories -TempoPath $tempoPath)) {
+            throw "Failed to initialize Tempo directories"
+        }
+
+        # Create configuration files
         foreach ($file in $script:REQUIRED_FILES.GetEnumerator()) {
             if (-not (Test-Path $file.Value)) {
                 $content = switch ($file.Key) {
@@ -187,9 +322,8 @@ function Initialize-DefaultConfigurations {
                     "docker-compose.yml" { Get-DockerComposeConfig }
                     default { "" }
                 }
-                if ($content) {
-                    Set-Content -Path $file.Value -Value $content -Force
-                    Write-Host "  Created file: $($file.Key)" -ForegroundColor Green
+                if ($content -and -not (New-ConfigurationFile -Path $file.Value -Content $content)) {
+                    throw "Failed to create configuration file: $($file.Key)"
                 }
             }
         }
@@ -197,6 +331,12 @@ function Initialize-DefaultConfigurations {
         # Create environment files
         Set-EnvironmentConfig -Environment "Development" -Force
         Set-EnvironmentConfig -Environment "Production" -Force
+
+        # Verify Tempo volume access
+        $tempoVolumePath = Join-Path $tempoPath "blocks"
+        if (-not (Test-TempoVolumeAccess -VolumePath $tempoVolumePath)) {
+            Write-Warning "  Tempo volume access verification failed - check permissions"
+        }
 
         Write-Host "`nConfiguration initialization completed." -ForegroundColor Green
         return $true
@@ -449,6 +589,14 @@ function Get-TempoConfig {
 server:
   http_listen_port: 3200
 
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks    # Updated path
+    wal:
+      path: /var/tempo/wal       # Updated path
+
 distributor:
   receivers:
     otlp:
@@ -458,25 +606,9 @@ distributor:
         http:
           endpoint: "0.0.0.0:4318"
 
-storage:
-  trace:
-    backend: local
-    wal:
-      path: /tmp/tempo/wal    # Required WAL path
-    local:
-      path: /tmp/tempo/blocks # Required blocks path
-
-compactor:
-  compaction:
-    block_retention: 48h
-
-ingester:
-  max_block_duration: "5m"
-  trace_idle_period: "10s"
-
 metrics_generator:
   storage:
-    path: /tmp/tempo/generator/wal
+    path: /var/tempo/generator/wal  # Updated path
 
 usage_report:
   reporting_enabled: false
@@ -695,15 +827,19 @@ Export-ModuleMember -Function @(
     'Test-Configuration',
     'Initialize-DefaultConfigurations',
     'Initialize-CorePaths',
-    
+    'Test-RequiredPath',
     # Environment configuration
     'Set-EnvironmentConfig',
-    
+    'Set-DirectoryPermissions',
     # Configuration generators
     'Get-PrometheusConfig',
     'Get-LokiConfig',
     'Get-TempoConfig',
-    'Get-DockerComposeConfig'
+    'Get-DockerComposeConfig',
+
+    'Initialize-TempoDirectories',
+    'Test-TempoVolumeAccess',
+    'New-ConfigurationFile'
 ) -Variable @(
     # Paths
     'PROJECT_ROOT',

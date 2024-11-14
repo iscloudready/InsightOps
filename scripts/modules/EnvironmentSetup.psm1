@@ -22,6 +22,27 @@ function Write-Success { param([string]$Message) Write-Host $Message -Foreground
 function Write-Warning { param([string]$Message) Write-Host $Message -ForegroundColor Yellow }
 function Write-Error { param([string]$Message) Write-Host $Message -ForegroundColor Red }
 
+# Set volume permissions for Docker on Windows
+function Set-VolumePermissions {
+    param(
+        [string]$VolumePath
+    )
+
+    # Ensure directory exists
+    if (-not (Test-Path -Path $VolumePath)) {
+        New-Item -ItemType Directory -Path $VolumePath | Out-Null
+    }
+
+    # Set Full Control permissions for Everyone on the directory
+    $directory = Get-Item -Path $VolumePath
+    $acl = Get-Acl -Path $directory.FullName
+    $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule("Everyone", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+    $acl.SetAccessRule($accessRule)
+    Set-Acl -Path $directory.FullName -AclObject $acl
+
+    Write-Info "Set full control permissions on $VolumePath for Docker access"
+}
+
 # Default configuration templates
 $script:CONFIG_TEMPLATES = @{
     Prometheus = @'
@@ -105,7 +126,7 @@ compactor:
 
 storage:
   trace:
-    backend: "local"    # Notice the quotes
+    backend: local
     local:
       path: /tmp/tempo/blocks
     wal:
@@ -266,25 +287,26 @@ services:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready"]
     logging: *default-logging
 
-  tempo:
-    image: grafana/tempo:latest
-    container_name: ${NAMESPACE:-insightops}_tempo
-    command: ["-config.file=/etc/tempo/tempo.yaml"]
-    environment:
-      - TEMPO_LOG_LEVEL=debug
-    volumes:
-      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
-      - tempo_data:/tmp/tempo
-    ports:
-      - "4317:4317"
-      - "4318:4318"
-      - "3200:3200"
-    healthcheck:
-      <<: *default-healthcheck
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
-      start_period: 45s
-    logging: *default-logging
-    restart: unless-stopped
+    tempo:
+        image: grafana/tempo:latest
+        container_name: ${NAMESPACE:-insightops}_tempo
+        user: root
+        command: ["-config.file=/etc/tempo/tempo.yaml"]
+        environment:
+            - TEMPO_LOG_LEVEL=debug
+        volumes:
+            - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+            - tempo_data:/var/tempo
+        ports:
+            - "${TEMPO_PORT:-4317}:4317"
+            - "${TEMPO_HTTP_PORT:-4318}:4318"
+            - "3200:3200"
+        healthcheck:
+            test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3200/ready || exit 1"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 30s
 
 volumes:
   postgres_data:
@@ -316,7 +338,7 @@ function Initialize-Environment {
         Write-Host "`nInitializing environment: $Environment" -ForegroundColor Cyan
         Write-Host "Using configuration path: $script:CONFIG_PATH" -ForegroundColor Yellow
 
-        # Create required directories
+        # Create required directories and set permissions if they are Docker volumes
         Write-Host "`nCreating required directories:" -ForegroundColor Yellow
         foreach ($path in $script:REQUIRED_PATHS) {
             if (-not (Test-Path $path)) {
@@ -324,6 +346,11 @@ function Initialize-Environment {
                 Write-Host "  [Created] $($path.Split('\')[-1])" -ForegroundColor Green
             } else {
                 Write-Host "  [Exists] $($path.Split('\')[-1])" -ForegroundColor Cyan
+            }
+
+            # Check if this path corresponds to a Docker volume (e.g., tempo_data)
+            if ($path -like "*tempo_data*" -or $path -like "*prometheus_data*" -or $path -like "*loki_data*") {
+                Set-VolumePermissions -VolumePath $path
             }
         }
 

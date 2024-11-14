@@ -1,0 +1,20 @@
+{
+    "DockerImage": "grafana/tempo:latest",
+    "VolumeName": "tempo_data",
+    "NetworkPattern": "*tempo*",
+    "ContainerName": "test_tempo",
+    "TestDirectory": "D:\\tempo-test",
+    "SkipValidation": false,
+    "NoCleanup": false,
+    "IncludeSystemPrune": true,
+    "ForceCleanup": true,
+    "Endpoints": {
+        "UI": "http://localhost:3200",
+        "Health": "http://localhost:3200/ready",
+        "Metrics": "http://localhost:3200/metrics",
+        "OTLP_HTTP": "http://localhost:4318",
+        "OTLP_gRPC": "localhost:4317"
+    },
+    "RetryAttempts": 6,
+    "RetryDelaySeconds": 5
+}
