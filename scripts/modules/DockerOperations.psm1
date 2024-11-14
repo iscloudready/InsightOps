@@ -1,7 +1,10 @@
 # DockerOperations.psm1
 # Purpose: Docker operations management
-$script:CONFIG_ROOT = Join-Path (Split-Path -Parent $PSScriptRoot) "Configurations"
-$script:DOCKER_COMPOSE_PATH = Join-Path $script:CONFIG_ROOT "docker-compose.yml"
+#$script:CONFIG_ROOT = Join-Path (Split-Path -Parent $PSScriptRoot) "Configurations"
+#$script:DOCKER_COMPOSE_PATH = Join-Path $script:CONFIG_ROOT "docker-compose.yml"
+
+$script:CONFIG_PATH = (Get-Variable -Name CONFIG_PATH -Scope Global).Value
+$script:DOCKER_COMPOSE_PATH = Join-Path $script:CONFIG_PATH "docker-compose.yml"
 
 function Initialize-DockerEnvironment {
     [CmdletBinding()]
@@ -218,13 +221,17 @@ function Stop-DockerServices {
             throw "Docker Compose configuration not found at: $script:DOCKER_COMPOSE_PATH"
         }
 
+        Write-Information "Docker Compose configuration found. Proceeding to stop services..."
+
         if ($RemoveVolumes) {
             docker-compose -f $script:DOCKER_COMPOSE_PATH down -v --remove-orphans
+            Write-Information "Stopped services and removed volumes."
         }
         else {
             docker-compose -f $script:DOCKER_COMPOSE_PATH down --remove-orphans
+            Write-Information "Stopped services without removing volumes."
         }
-        
+
         Write-Success "Docker services stopped successfully"
         return $true
     }

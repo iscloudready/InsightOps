@@ -67,8 +67,11 @@ services:
     ports:
       - "${LOKI_PORT:-3101}:3100"
     healthcheck:
-      <<: *default-healthcheck
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s  # Increased start period for Loki
     logging: *default-logging
 
   tempo:
@@ -79,7 +82,7 @@ services:
     environment:
       - TEMPO_LOG_LEVEL=debug
     volumes:
-      - .${hostVolumePath}:/etc/tempo/tempo.yaml:ro
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
       - tempo_data:/var/tempo
     ports:
       - "${TEMPO_PORT:-4317}:4317"
@@ -95,14 +98,19 @@ services:
 volumes:
   postgres_data:
     name: ${NAMESPACE:-insightops}_postgres_data
+    external: true
   grafana_data:
     name: ${NAMESPACE:-insightops}_grafana_data
+    external: true
   prometheus_data:
     name: ${NAMESPACE:-insightops}_prometheus_data
+    external: true
   loki_data:
     name: ${NAMESPACE:-insightops}_loki_data
+    external: true
   tempo_data:
     name: ${NAMESPACE:-insightops}_tempo_data
+    external: true
 
 networks:
   default:

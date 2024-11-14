@@ -295,8 +295,11 @@ services:
     ports:
       - "${LOKI_PORT:-3101}:3100"
     healthcheck:
-      <<: *default-healthcheck
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s  # Increased start period for Loki
     logging: *default-logging
 
   tempo:
@@ -323,14 +326,19 @@ services:
 volumes:
   postgres_data:
     name: ${NAMESPACE:-insightops}_postgres_data
+    external: true
   grafana_data:
     name: ${NAMESPACE:-insightops}_grafana_data
+    external: true
   prometheus_data:
     name: ${NAMESPACE:-insightops}_prometheus_data
+    external: true
   loki_data:
     name: ${NAMESPACE:-insightops}_loki_data
+    external: true
   tempo_data:
     name: ${NAMESPACE:-insightops}_tempo_data
+    external: true
 
 networks:
   default:
@@ -338,6 +346,24 @@ networks:
     driver: bridge
 '@
 }
+
+# Ensures full control permissions for Docker volumes
+function Ensure-DockerPermissions {
+    param ([string[]]$Paths)
+    foreach ($path in $Paths) {
+        if (-not (Test-Path $path)) {
+            New-Item -ItemType Directory -Path $path -Force | Out-Null
+        }
+        $acl = Get-Acl -Path $path
+        $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            "Everyone", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
+        )
+        $acl.SetAccessRule($accessRule)
+        Set-Acl -Path $path -AclObject $acl
+        Write-Host "Set full control permissions on $path for Docker access" -ForegroundColor Green
+    }
+}
+
 
 function Write-ConfigFile {
     [CmdletBinding()]
@@ -450,43 +476,68 @@ function Initialize-Environment {
         Write-Info "Using configuration path: $script:CONFIG_PATH"
 
         # Ensure host volume path for Tempo data is created with permissions
+        Write-Info "Ensuring host volume path for Tempo data..."
         Ensure-HostVolumePath -Path $hostVolumePath
+
+        # Manually create paths for Docker permissions
+        Write-Info "Setting Docker permissions for data directories..."
+        $dockerPaths = @(
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "postgres_data";
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "grafana_data";
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "prometheus_data";
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "loki_data";
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "tempo_data"
+        )
+        Ensure-DockerPermissions -Paths $dockerPaths
 
         Write-Info "`nCreating required directories:"
         foreach ($path in $script:REQUIRED_PATHS) {
-            if (-not (Test-Path $path) -or $Force) {
-                New-Item -ItemType Directory -Path $path -Force | Out-Null
-                Write-Success "  [Created] $($path.Split('\')[-1])"
+            # Replace any incorrect path references
+            $correctedPath = $path -replace "scripts\\Configurations", "Configurations"
+            Write-Info "Processing path: $correctedPath"
+
+            if (-not (Test-Path -Path $correctedPath) -or $Force) {
+                New-Item -ItemType Directory -Path $correctedPath -Force | Out-Null
+                Write-Success "  [Created] $($correctedPath.Split('\')[-1])"
+            } else {
+                Write-Info "  [Exists] $($correctedPath.Split('\')[-1])"
             }
-            if ($path -like "*tempo_data*" -or $path -like "*prometheus_data*" -or $path -like "*loki_data*") {
-                Set-VolumePermissions -VolumePath $path
+
+            # Set permissions on specific data paths
+            if ($correctedPath -like "*tempo_data*" -or $correctedPath -like "*prometheus_data*" -or $correctedPath -like "*loki_data*") {
+                Set-VolumePermissions -VolumePath $correctedPath
             }
         }
 
         Write-Info "`nSetting up configuration files:"
-        $configs = @{
-            "tempo/tempo.yaml" = Get-TempoConfig
-            "loki/loki-config.yaml" = Get-LokiConfig
-            "prometheus/prometheus.yml" = Get-PrometheusConfig
-            "docker-compose.yml" = Get-DockerComposeConfig
-        }
+        # Define configuration files with paths and ensure they're joined correctly
+        $configs = @(
+            @{Key = "tempo/tempo.yaml"; Value = Get-TempoConfig},
+            @{Key = "loki/loki-config.yaml"; Value = Get-LokiConfig},
+            @{Key = "prometheus/prometheus.yml"; Value = Get-PrometheusConfig},
+            @{Key = "docker-compose.yml"; Value = Get-DockerComposeConfig}
+        )
 
-        foreach ($config in $configs.GetEnumerator()) {
-            $filePath = Join-Path $script:CONFIG_PATH $config.Key
-            if (-not (Test-Path $filePath) -or $Force) {
-                $directory = Split-Path $filePath -Parent
+        foreach ($config in $configs) {
+            # Use single Join-Path call for each file path
+            $filePath = Join-Path -Path $script:CONFIG_PATH -ChildPath $config.Key
+            Write-Info "Setting up config file: $filePath"
+
+            if (-not (Test-Path -Path $filePath) -or $Force) {
+                $directory = Split-Path -Path $filePath -Parent
                 Initialize-Directory -Path $directory
-                
+
                 # Write with UTF8 encoding without BOM
                 $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
                 [System.IO.File]::WriteAllText($filePath, $config.Value, $utf8NoBomEncoding)
-                
+
                 Write-Success "  [Created] $($config.Key)"
             } else {
                 Write-Info "  [Exists] $($config.Key)"
             }
         }
 
+        Write-Info "Setting environment configuration..."
         if (Set-EnvironmentConfig -Environment $Environment -Force:$Force) {
             Write-Success "  [OK] Created .env.$Environment"
         }
@@ -508,10 +559,11 @@ function Test-Configuration {
         Write-Host "Checking configurations..." -ForegroundColor Cyan
         $configurationValid = $true
         foreach ($dir in $script:REQUIRED_PATHS) {
-            if (Test-Path $dir) {
-                Write-Host "✓ Directory exists: $dir" -ForegroundColor Green
+            $correctedDir = $dir -replace "scripts\\Configurations", "Configurations"
+            if (Test-Path $correctedDir) {
+                Write-Host "✓ Directory exists: $correctedDir" -ForegroundColor Green
             } else {
-                Write-Host "✗ Missing directory: $dir" -ForegroundColor Red
+                Write-Host "✗ Missing directory: $correctedDir" -ForegroundColor Red
                 $configurationValid = $false
             }
         }
