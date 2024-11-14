@@ -61,9 +61,11 @@ services:
   loki:
     image: grafana/loki:2.9.3
     container_name: ${NAMESPACE:-insightops}_loki
+    user: "1000:1000"  # adjust to match the ownership of loki_wal directory
     volumes:
       - ./loki/loki-config.yaml:/etc/loki/local-config.yaml
       - loki_data:/loki
+      - ${CONFIG_PATH}/loki_wal:/loki/wal  # Map loki_wal explicitly
     ports:
       - "${LOKI_PORT:-3101}:3100"
     healthcheck:
@@ -110,6 +112,9 @@ volumes:
     external: true
   tempo_data:
     name: ${NAMESPACE:-insightops}_tempo_data
+    external: true
+  loki_wal:  # <-- Add loki_wal here
+    name: ${NAMESPACE:-insightops}_loki_wal
     external: true
 
 networks:

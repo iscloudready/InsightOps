@@ -289,9 +289,11 @@ services:
   loki:
     image: grafana/loki:2.9.3
     container_name: ${NAMESPACE:-insightops}_loki
+    user: "root"  # Changed to root to ensure write permissions
     volumes:
       - ./loki/loki-config.yaml:/etc/loki/local-config.yaml
       - loki_data:/loki
+      - ${CONFIG_PATH}/loki_wal:/loki/wal  # Map loki_wal explicitly
     ports:
       - "${LOKI_PORT:-3101}:3100"
     healthcheck:
@@ -299,7 +301,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 60s  # Increased start period for Loki
+      start_period: 60s
     logging: *default-logging
 
   tempo:
@@ -339,6 +341,9 @@ volumes:
   tempo_data:
     name: ${NAMESPACE:-insightops}_tempo_data
     external: true
+  loki_wal:
+    name: ${NAMESPACE:-insightops}_loki_wal
+    external: true
 
 networks:
   default:
@@ -363,7 +368,6 @@ function Ensure-DockerPermissions {
         Write-Host "Set full control permissions on $path for Docker access" -ForegroundColor Green
     }
 }
-
 
 function Write-ConfigFile {
     [CmdletBinding()]
@@ -474,6 +478,17 @@ function Initialize-Environment {
     try {
         Write-Info "`nInitializing environment: $Environment"
         Write-Info "Using configuration path: $script:CONFIG_PATH"
+
+        # Check if loki_wal directory exists and create it if missing
+        Write-Info "Ensuring loki_wal directory exists and has correct permissions..."
+        if (-not (Test-Path -Path "$script:CONFIG_PATH\loki_wal")) {
+            New-Item -ItemType Directory -Path "$script:CONFIG_PATH\loki_wal" | Out-Null
+            Write-Success "  [Created] loki_wal directory"
+        }
+
+        # Set Docker permissions for loki_wal
+        Set-VolumePermissions -VolumePath "$script:CONFIG_PATH\loki_wal"
+        Write-Info "Permissions set for loki_wal directory"
 
         # Ensure host volume path for Tempo data is created with permissions
         Write-Info "Ensuring host volume path for Tempo data..."

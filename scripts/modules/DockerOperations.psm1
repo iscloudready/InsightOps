@@ -5,6 +5,7 @@
 
 $script:CONFIG_PATH = (Get-Variable -Name CONFIG_PATH -Scope Global).Value
 $script:DOCKER_COMPOSE_PATH = Join-Path $script:CONFIG_PATH "docker-compose.yml"
+#$env:CONFIG_PATH = $script:CONFIG_PATH  # Setting the environment variable for Docker Compose
 
 function Initialize-DockerEnvironment {
     [CmdletBinding()]
@@ -183,12 +184,16 @@ function Test-ServiceHealth {
     }
 }
 
-function Start-DockerServices {
+function Start-DockerServices { 
     [CmdletBinding()]
     param()
     
     try {
         Write-Host "`nStarting Docker services..." -ForegroundColor Cyan
+
+        # Set the CONFIG_PATH environment variable for Docker Compose
+        $env:CONFIG_PATH = $script:CONFIG_PATH  
+        Write-Host "Config Path: $script:CONFIG_PATH"
 
         if (-not (Test-Path $script:DOCKER_COMPOSE_PATH)) {
             throw "Docker Compose file not found at: $script:DOCKER_COMPOSE_PATH"

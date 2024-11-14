@@ -4,6 +4,7 @@
 $ErrorActionPreference = "Stop"
 $script:BASE_PATH = $PSScriptRoot
 $script:MODULE_PATH = Join-Path $BASE_PATH "Modules"
+$env:CONFIG_PATH = $script:CONFIG_PATH
 
 # Helper function to check prerequisites before starting services
 function Test-Prerequisites {
