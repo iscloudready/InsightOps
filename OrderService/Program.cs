@@ -114,11 +114,16 @@ app.MapPrometheusScrapingEndpoint("/metrics");
 // Enable Swagger in development mode
 if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwagger(c => {
+        c.RouteTemplate = "swagger/{documentName}/swagger.json";
+    });
+    app.UseSwaggerUI(c => {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Order Service API V1");
+        c.RoutePrefix = "swagger";
+    });
 }
 
-app.UseHttpsRedirection();
+//app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();
 

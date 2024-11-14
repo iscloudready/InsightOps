@@ -270,6 +270,7 @@ services:
     container_name: ${NAMESPACE:-insightops}_orderservice
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker  # Set environment to Docker
+      - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
     ports:
       - "${ORDERSERVICE_PORT:-7265}:80"
@@ -292,6 +293,7 @@ services:
     container_name: ${NAMESPACE:-insightops}_inventoryservice
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker  # Set environment to Docker
+      - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
     ports:
       - "${INVENTORYSERVICE_PORT:-7070}:80"
@@ -314,6 +316,7 @@ services:
     container_name: ${NAMESPACE:-insightops}_apigateway
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker  # Set environment to Docker
+      - ASPNETCORE_URLS=http://+:80
     ports:
       - "${APIGATEWAY_PORT:-7237}:80" 
     depends_on:
@@ -335,6 +338,7 @@ services:
     container_name: ${NAMESPACE:-insightops}_frontend
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker  # Set environment to Docker
+      - ASPNETCORE_URLS=http://+:80
     ports:
       - "${FRONTEND_PORT:-7144}:80"
     depends_on:
