@@ -61,7 +61,7 @@ services:
   loki:
     image: grafana/loki:2.9.3
     container_name: ${NAMESPACE:-insightops}_loki
-    user: "1000:1000"  # adjust to match the ownership of loki_wal directory
+    user: "root"  # Changed to root to ensure write permissions
     volumes:
       - ./loki/loki-config.yaml:/etc/loki/local-config.yaml
       - loki_data:/loki
@@ -73,7 +73,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 60s  # Increased start period for Loki
+      start_period: 60s
     logging: *default-logging
 
   tempo:
@@ -113,7 +113,7 @@ volumes:
   tempo_data:
     name: ${NAMESPACE:-insightops}_tempo_data
     external: true
-  loki_wal:  # <-- Add loki_wal here
+  loki_wal:
     name: ${NAMESPACE:-insightops}_loki_wal
     external: true
 

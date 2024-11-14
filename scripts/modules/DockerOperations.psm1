@@ -1,11 +1,8 @@
 # DockerOperations.psm1
 # Purpose: Docker operations management
-#$script:CONFIG_ROOT = Join-Path (Split-Path -Parent $PSScriptRoot) "Configurations"
-#$script:DOCKER_COMPOSE_PATH = Join-Path $script:CONFIG_ROOT "docker-compose.yml"
-
 $script:CONFIG_PATH = (Get-Variable -Name CONFIG_PATH -Scope Global).Value
 $script:DOCKER_COMPOSE_PATH = Join-Path $script:CONFIG_PATH "docker-compose.yml"
-#$env:CONFIG_PATH = $script:CONFIG_PATH  # Setting the environment variable for Docker Compose
+$script:ENV_FILE = Join-Path $script:CONFIG_PATH ".env.Development"
 
 function Initialize-DockerEnvironment {
     [CmdletBinding()]
@@ -14,11 +11,13 @@ function Initialize-DockerEnvironment {
     try {
         # Check if docker-compose.yml exists
         if (-not (Test-Path $script:DOCKER_COMPOSE_PATH)) {
-            Write-Warning "Docker Compose configuration not found. Creating default configuration..."
-            if (-not (Initialize-DefaultConfigurations)) {
-                throw "Failed to create default configurations"
-            }
+            Write-Warning "Docker Compose configuration not found at: $script:DOCKER_COMPOSE_PATH"
+            return $false
         }
+
+        # Explicitly set CONFIG_PATH environment variable
+        $env:CONFIG_PATH = $script:CONFIG_PATH
+        Write-Verbose "Set CONFIG_PATH environment variable to: $($env:CONFIG_PATH)"
 
         # Verify Docker is running
         $dockerPsOutput = docker ps -q
@@ -30,6 +29,70 @@ function Initialize-DockerEnvironment {
     }
     catch {
         Write-Error "Failed to initialize Docker environment: $_"
+        return $false
+    }
+}
+
+function Stop-DockerServices {
+    [CmdletBinding()]
+    param (
+        [switch]$RemoveVolumes
+    )
+    
+    try {
+        Write-Information "Stopping Docker services..."
+        
+        if (-not (Test-Path $script:DOCKER_COMPOSE_PATH)) {
+            throw "Docker Compose configuration not found at: $script:DOCKER_COMPOSE_PATH"
+        }
+
+        Write-Information "Docker Compose configuration found. Proceeding to stop services..."
+
+        # Set environment variables
+        $env:CONFIG_PATH = $script:CONFIG_PATH
+        
+        # Create process start info for better environment variable handling
+        $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+        $pinfo.FileName = "docker-compose"
+        $pinfo.RedirectStandardError = $true
+        $pinfo.RedirectStandardOutput = $true
+        $pinfo.UseShellExecute = $false
+        $pinfo.Arguments = "-f `"$script:DOCKER_COMPOSE_PATH`" down"
+        
+        if ($RemoveVolumes) {
+            $pinfo.Arguments += " -v"
+        }
+        $pinfo.Arguments += " --remove-orphans"
+        
+        # Add environment variables
+        $pinfo.EnvironmentVariables["CONFIG_PATH"] = $script:CONFIG_PATH
+        
+        # Create and start the process
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $pinfo
+        $process.Start() | Out-Null
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+
+        if ($process.ExitCode -ne 0) {
+            Write-Warning "Process output: $stdout"
+            Write-Warning "Process error: $stderr"
+            throw "Docker Compose command failed with exit code: $($process.ExitCode)"
+        }
+
+        if ($RemoveVolumes) {
+            Write-Information "Stopped services and removed volumes."
+        }
+        else {
+            Write-Information "Stopped services without removing volumes."
+        }
+
+        Write-Success "Docker services stopped successfully"
+        return $true
+    }
+    catch {
+        Write-Error "Failed to stop Docker services: $_"
         return $false
     }
 }
@@ -213,7 +276,7 @@ function Start-DockerServices {
     }
 }
 
-function Stop-DockerServices {
+function _Stop-DockerServices {
     [CmdletBinding()]
     param (
         [switch]$RemoveVolumes
