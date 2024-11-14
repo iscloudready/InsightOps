@@ -22,4 +22,5 @@ RUN dotnet publish "OrderService.csproj" -c Release -o /app/publish
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+RUN apt-get update && apt-get install -y curl iputils-ping && rm -rf /var/lib/apt/lists/*
 ENTRYPOINT ["dotnet", "OrderService.dll"]
