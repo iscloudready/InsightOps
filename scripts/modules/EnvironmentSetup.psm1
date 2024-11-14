@@ -260,6 +260,76 @@ services:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-insightops_user} -d ${DB_NAME:-insightops_db}"]
     logging: *default-logging
 
+  orderservice:
+    build:
+      context: ./OrderService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_orderservice
+    environment:
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+    ports:
+      - "${ORDERSERVICE_PORT:-7265}:80"  # Host port 7265 mapped to container port 80
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+    logging: *default-logging
+    networks:
+      - default
+
+  inventoryservice:
+    build:
+      context: ./InventoryService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_inventoryservice
+    environment:
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+    ports:
+      - "${INVENTORYSERVICE_PORT:-7070}:80"  # Host port 7070 mapped to container port 80
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+    logging: *default-logging
+    networks:
+      - default
+
+  apigateway:
+    build:
+      context: ./ApiGateway
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_apigateway
+    ports:
+      - "${APIGATEWAY_PORT:-7237}:80"  # Host port 7237 mapped to container port 80
+    depends_on:
+      - orderservice
+      - inventoryservice
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+    logging: *default-logging
+    networks:
+      - default
+
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_frontend
+    ports:
+      - "${FRONTEND_PORT:-7144}:80"  # Host port 7144 mapped to container port 80
+    depends_on:
+      - apigateway
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+    logging: *default-logging
+    networks:
+      - default
   grafana:
     image: grafana/grafana:latest
     container_name: ${NAMESPACE:-insightops}_grafana

@@ -376,39 +376,63 @@ function Invoke-MenuChoice {
                 }
             }
 
-            # Access
-            "20" { 
-                # Observability UIs
-                Write-Host "`nOpening Observability UIs..." -ForegroundColor Cyan
-                Start-Process "http://localhost:3001"     # Grafana
-                Start-Process "http://localhost:9091"     # Prometheus
-                Start-Process "http://localhost:3101"     # Loki
+                # Access
+                "20" { 
+                    # Observability UIs
+                    Write-Host "`nOpening Observability UIs..." -ForegroundColor Cyan
+                    Start-Process "http://localhost:3001"     # Grafana
+                    Start-Process "http://localhost:9091"     # Prometheus
+                    Start-Process "http://localhost:3101"     # Loki
+                    Start-Process "http://localhost:4317"     # Tempo
 
-                # Service UIs
-                Write-Host "`nOpening Service UIs..." -ForegroundColor Cyan
-                Start-Process "http://localhost:5010"         # Frontend UI
-                Start-Process "http://localhost:5010/swagger" # Frontend Swagger
-                Start-Process "http://localhost:5011/swagger" # API Gateway Swagger
-                Start-Process "http://localhost:5012/swagger" # Order Service Swagger
-                Start-Process "http://localhost:5013/swagger" # Inventory Service Swagger
+                    # Additional Loki Endpoints
+                    Start-Process "http://localhost:3101/loki/api/v1/query"          # Loki Query
+                    Start-Process "http://localhost:3101/loki/api/v1/query_range"    # Loki Query Range
+                    Start-Process "http://localhost:3101/loki/api/v1/label"          # Loki Label
+                    Start-Process "http://localhost:3101/loki/api/v1/push"           # Loki Push
+                    Start-Process "http://localhost:3101/metrics"                    # Loki Metrics
 
-                Write-Host "`nService URLs:" -ForegroundColor Yellow
-                Write-Host "Observability Stack:" -ForegroundColor Cyan
-                Write-Host "  • Grafana:    http://localhost:3001" -ForegroundColor Green
-                Write-Host "  • Prometheus: http://localhost:9091" -ForegroundColor Green
-                Write-Host "  • Loki:       http://localhost:3101" -ForegroundColor Green
-                Write-Host "  • Tempo:      http://localhost:4317" -ForegroundColor Green
+                    # Additional Tempo Endpoints
+                    Start-Process "http://localhost:4318"                            # Tempo HTTP (OTLP)
+                    Start-Process "http://localhost:3200/jaeger/api/traces"          # Tempo Jaeger Query
+                    Start-Process "http://localhost:3200/ready"                      # Tempo Ready
+                    Start-Process "http://localhost:3200/metrics"                    # Tempo Metrics
 
-                Write-Host "`nApplication Services:" -ForegroundColor Cyan
-                Write-Host "  • Frontend UI:        http://localhost:5010" -ForegroundColor Green
-                Write-Host "  • Frontend API:       http://localhost:5010/swagger" -ForegroundColor Green
-                Write-Host "  • API Gateway:        http://localhost:5011/swagger" -ForegroundColor Green
-                Write-Host "  • Order Service:      http://localhost:5012/swagger" -ForegroundColor Green
-                Write-Host "  • Inventory Service:  http://localhost:5013/swagger" -ForegroundColor Green
+                    # Service UIs
+                    Write-Host "`nOpening Service UIs..." -ForegroundColor Cyan
+                    Start-Process "http://localhost:5010"         # Frontend UI
+                    Start-Process "http://localhost:5010/swagger" # Frontend Swagger
+                    Start-Process "http://localhost:5011/swagger" # API Gateway Swagger
+                    Start-Process "http://localhost:5012/swagger" # Order Service Swagger
+                    Start-Process "http://localhost:5013/swagger" # Inventory Service Swagger
 
-                Write-Host "`nNote: It may take a few moments for all services to be ready." -ForegroundColor Yellow
-                Write-Host "      Check service health (Option 10) to verify availability." -ForegroundColor Yellow
-            }
+                    Write-Host "`nService URLs:" -ForegroundColor Yellow
+                    Write-Host "Observability Stack:" -ForegroundColor Cyan
+                    Write-Host "  • Grafana:              http://localhost:3001" -ForegroundColor Green
+                    Write-Host "  • Prometheus:           http://localhost:9091" -ForegroundColor Green
+                    Write-Host "  • Loki (Main):          http://localhost:3101" -ForegroundColor Green
+                    Write-Host "  • Loki (Query):         http://localhost:3101/loki/api/v1/query" -ForegroundColor Green
+                    Write-Host "  • Loki (Query Range):   http://localhost:3101/loki/api/v1/query_range" -ForegroundColor Green
+                    Write-Host "  • Loki (Label):         http://localhost:3101/loki/api/v1/label" -ForegroundColor Green
+                    Write-Host "  • Loki (Push):          http://localhost:3101/loki/api/v1/push" -ForegroundColor Green
+                    Write-Host "  • Loki (Metrics):       http://localhost:3101/metrics" -ForegroundColor Green
+                    Write-Host "  • Tempo (gRPC OTLP):    http://localhost:4317" -ForegroundColor Green
+                    Write-Host "  • Tempo (HTTP OTLP):    http://localhost:4318" -ForegroundColor Green
+                    Write-Host "  • Tempo (Jaeger Query): http://localhost:3200/jaeger/api/traces" -ForegroundColor Green
+                    Write-Host "  • Tempo (Ready):        http://localhost:3200/ready" -ForegroundColor Green
+                    Write-Host "  • Tempo (Metrics):      http://localhost:3200/metrics" -ForegroundColor Green
+
+                    Write-Host "`nApplication Services:" -ForegroundColor Cyan
+                    Write-Host "  • Frontend UI:        http://localhost:5010" -ForegroundColor Green
+                    Write-Host "  • Frontend API:       http://localhost:5010/swagger" -ForegroundColor Green
+                    Write-Host "  • API Gateway:        http://localhost:5011/swagger" -ForegroundColor Green
+                    Write-Host "  • Order Service:      http://localhost:5012/swagger" -ForegroundColor Green
+                    Write-Host "  • Inventory Service:  http://localhost:5013/swagger" -ForegroundColor Green
+
+                    Write-Host "`nNote: It may take a few moments for all services to be ready." -ForegroundColor Yellow
+                    Write-Host "      Check service health (Option 10) to verify availability." -ForegroundColor Yellow
+                }
+
 
             "21" { Get-DetailedServiceLogs }  # Add this as a new menu option
 
