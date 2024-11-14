@@ -37,33 +37,37 @@ services:
     environment:
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
     ports:
-      - "${ORDERSERVICE_PORT:-7265}:80"  # Host port 7265 mapped to container port 80
+      - "${ORDERSERVICE_PORT:-7265}:80"
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      <<: *default-healthcheck
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-    logging: *default-logging
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
     networks:
       - default
 
   inventoryservice:
     build:
-      context: ./InventoryService
+      context: ./InventoryService 
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_inventoryservice
     environment:
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
     ports:
-      - "${INVENTORYSERVICE_PORT:-7070}:80"  # Host port 7070 mapped to container port 80
+      - "${INVENTORYSERVICE_PORT:-7070}:80"
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      <<: *default-healthcheck
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-    logging: *default-logging
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
     networks:
       - default
 
@@ -73,14 +77,16 @@ services:
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_apigateway
     ports:
-      - "${APIGATEWAY_PORT:-7237}:80"  # Host port 7237 mapped to container port 80
+      - "${APIGATEWAY_PORT:-7237}:80" 
     depends_on:
       - orderservice
       - inventoryservice
     healthcheck:
-      <<: *default-healthcheck
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-    logging: *default-logging
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
     networks:
       - default
 
@@ -90,15 +96,18 @@ services:
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_frontend
     ports:
-      - "${FRONTEND_PORT:-7144}:80"  # Host port 7144 mapped to container port 80
+      - "${FRONTEND_PORT:-7144}:80"
     depends_on:
       - apigateway
     healthcheck:
-      <<: *default-healthcheck
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-    logging: *default-logging
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
     networks:
       - default
+
   grafana:
     image: grafana/grafana:latest
     container_name: ${NAMESPACE:-insightops}_grafana
@@ -135,11 +144,11 @@ services:
   loki:
     image: grafana/loki:2.9.3
     container_name: ${NAMESPACE:-insightops}_loki
-    user: "root"  # Changed to root to ensure write permissions
+    user: "root"
     volumes:
       - ./loki/loki-config.yaml:/etc/loki/local-config.yaml
       - loki_data:/loki
-      - ${CONFIG_PATH}/loki_wal:/loki/wal  # Map loki_wal explicitly
+      - ${CONFIG_PATH}/loki_wal:/loki/wal
     ports:
       - "${LOKI_PORT:-3101}:3100"
     healthcheck:

@@ -1,9 +1,9 @@
-﻿# FrontendService Dockerfile
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+﻿FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /app
 EXPOSE 80
+
 RUN apt-get update \
-    && apt-get install -y curl iputils-ping \
+    && apt-get install -y wget \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -20,5 +20,4 @@ RUN dotnet publish "FrontendService.csproj" -c Release -o /app/publish
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
-HEALTHCHECK CMD curl -f http://localhost:80/health || exit 1
 ENTRYPOINT ["dotnet", "FrontendService.dll"]
