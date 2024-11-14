@@ -2,10 +2,10 @@ apiVersion: 1
 providers:
   - name: 'InsightOps'
     orgId: 1
-    folder: 'InsightOps'
-    folderUid: 'insightops'
+    folder: ''
     type: file
     disableDeletion: false
+    editable: true
     updateIntervalSeconds: 30
     allowUiUpdates: true
     options:

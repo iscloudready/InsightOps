@@ -725,18 +725,38 @@ $sampleDashboard = @'
 }
 '@
 
-        # And update how we write the files:
-        $grafanaConfigs = @{
+        # Clean and create directories
+        $grafanaPath = Join-Path $script:CONFIG_PATH "grafana"
+
+        # Clean existing Grafana configuration
+        if (Test-Path $grafanaPath) {
+            Get-ChildItem -Path $grafanaPath -Recurse -File | Remove-Item -Force
+        }
+
+        # Create directory structure
+        $grafanaDirs = @(
+            "$grafanaPath\provisioning\dashboards",
+            "$grafanaPath\provisioning\datasources",
+            "$grafanaPath\provisioning\plugins",
+            "$grafanaPath\provisioning\alerting",
+            "$grafanaPath\dashboards"
+        )
+
+        foreach ($dir in $grafanaDirs) {
+            if (-not (Test-Path $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+                Write-Success "  [Created] Grafana directory: $($dir.Split('\')[-1])"
+            }
+        }
+
+        # Write configurations
+        $configs = @{
             "$grafanaPath\provisioning\dashboards\dashboards.yaml" = $dashboardProvisionConfig
             "$grafanaPath\provisioning\datasources\datasources.yaml" = $datasourceConfig
             "$grafanaPath\dashboards\overview.json" = $sampleDashboard
         }
 
-        # First clean existing files
-        Get-ChildItem -Path $grafanaPath -Recurse -File | Remove-Item -Force
-
-        # Then write new files
-        foreach ($config in $grafanaConfigs.GetEnumerator()) {
+        foreach ($config in $configs.GetEnumerator()) {
             try {
                 $directory = Split-Path -Parent $config.Key
                 if (-not (Test-Path $directory)) {
@@ -752,41 +772,16 @@ $sampleDashboard = @'
             }
         }
 
-        # Create alerting directory to prevent warnings
-        $alertingPath = "$grafanaPath\provisioning\alerting"
-        if (-not (Test-Path $alertingPath)) {
-            New-Item -ItemType Directory -Path $alertingPath -Force | Out-Null
-            Write-Success "  [Created] Alerting directory"
-        }
-
-        # Set read permissions on Grafana files
-        Get-ChildItem -Path $grafanaPath -Recurse | ForEach-Object {
-            try {
-                $acl = Get-Acl -Path $_.FullName
-                $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-                    "Everyone",
-                    "Read",
-                    "None",
-                    "None",
-                    "Allow"
-                )
-                $acl.AddAccessRule($accessRule)
-                Set-Acl -Path $_.FullName -AclObject $acl
-            }
-            catch {
-                Write-Warning "Failed to set permissions for $($_.FullName): $_"
-            }
-        }
-
         Write-Success "`nGrafana initialization completed successfully"
         Write-Success "`nEnvironment initialization completed successfully"
         return $true
-    }
-    catch {
-        Write-Error "`nEnvironment initialization failed: $($_.Exception.Message)"
-        return $false
-    }
-}
+            }
+            catch {
+                Write-Error "`nEnvironment initialization failed: $($_.Exception.Message)"
+                return $false
+            }
+        }
+
 
 function Test-Configuration {
     [CmdletBinding()]
