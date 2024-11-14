@@ -222,6 +222,12 @@ function Initialize-Application {
             }
         }
 
+        # Verify that Initialize-Environment function is available
+        if (-not (Get-Command -Name "Initialize-Environment" -ErrorAction SilentlyContinue)) {
+            Write-ModuleMessage "Initialize-Environment function is not available after importing EnvironmentSetup" -Color Red
+            throw "Initialize-Environment not found. Ensure EnvironmentSetup.psm1 exports this function."
+        }
+
         Write-ModuleMessage "Initialization completed successfully" -Color Green
         return $true
     }

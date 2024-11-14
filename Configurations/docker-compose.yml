@@ -74,21 +74,23 @@ services:
   tempo:
     image: grafana/tempo:latest
     container_name: ${NAMESPACE:-insightops}_tempo
+    user: root
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     environment:
       - TEMPO_LOG_LEVEL=debug
     volumes:
-      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
-      - tempo_data:/tmp/tempo  # Mount path for tempo_data
+      - .${hostVolumePath}:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
     ports:
-      - "4317:4317"
-      - "4318:4318"
+      - "${TEMPO_PORT:-4317}:4317"
+      - "${TEMPO_HTTP_PORT:-4318}:4318"
       - "3200:3200"
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
-      start_period: 60s
-    logging: *default-logging
-    restart: unless-stopped
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3200/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   postgres_data:
