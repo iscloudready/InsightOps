@@ -4,15 +4,8 @@
     "windowsAuthentication": false,
     "anonymousAuthentication": true,
     "iisExpress": {
-      "applicationUrl": "http://localhost:47690",
-      "sslPort": 44382
-    }
-  },
-  "Kestrel": {
-    "Endpoints": {
-      "Http": {
-        "Url": "http://*:80"
-      }
+      "applicationUrl": "http://localhost:7071",
+      "sslPort": 44391
     }
   },
   "profiles": {
@@ -21,17 +14,7 @@
       "dotnetRunMessages": true,
       "launchBrowser": true,
       "launchUrl": "swagger",
-      "applicationUrl": "http://localhost:5126",
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
-      }
-    },
-    "https": {
-      "commandName": "Project",
-      "dotnetRunMessages": true,
-      "launchBrowser": true,
-      "launchUrl": "swagger",
-      "applicationUrl": "https://localhost:7070;http://localhost:5126",
+      "applicationUrl": "http://localhost:7071",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
@@ -49,11 +32,10 @@
       "launchBrowser": true,
       "launchUrl": "{Scheme}://{ServiceHost}:{ServicePort}/swagger",
       "environmentVariables": {
-        "ASPNETCORE_HTTPS_PORTS": "8081",
-        "ASPNETCORE_HTTP_PORTS": "8080"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_HTTP_PORTS": "7071"
       },
-      "publishAllPorts": true,
-      "useSSL": true
+      "publishAllPorts": true
     }
   }
 }

@@ -1,13 +1,28 @@
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
-using OpenTelemetry;
+using Microsoft.OpenApi.Models;
 using OpenTelemetry.Metrics;
-using OpenTelemetry.Trace;
 using OpenTelemetry.Resources;
-using OpenTelemetry.Instrumentation.Runtime; // Add runtime instrumentation
-using OpenTelemetry.Exporter.Prometheus;
+using OpenTelemetry.Trace;
 using InventoryService.Repositories;
+using System.Reflection;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configure swagger first
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Inventory Service API",
+        Version = "v1",
+        Description = "Inventory Service API Description"
+    });
+    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+    c.IncludeXmlComments(xmlPath);
+});
 
 builder.Configuration
     .SetBasePath(Directory.GetCurrentDirectory())
@@ -15,16 +30,18 @@ builder.Configuration
     .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
     .AddEnvironmentVariables();
 
-// Configure Kestrel to listen on specified ports
-builder.WebHost.ConfigureKestrel(options =>
-{
-    options.ListenAnyIP(80); // HTTP on port 8080
-    //options.ListenAnyIP(8081, listenOptions => listenOptions.UseHttps()); // HTTPS on port 8081
-});
-
-// Configure PostgreSQL Database connection for InventoryService
+// Configure PostgreSQL Database connection with retry policy
 builder.Services.AddDbContext<InventoryDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")));
+{
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres"),
+        npgsqlOptionsAction: sqlOptions =>
+        {
+            sqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(30),
+                errorCodesToAdd: null);
+        });
+});
 
 // Add InventoryRepository as a scoped service
 builder.Services.AddScoped<InventoryRepository>();
@@ -34,17 +51,18 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddControllers();
 
-// Configure Swagger for API documentation
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddHealthChecks();
 
-// Configure HttpClient for InventoryService
+// Configure Swagger
+builder.Services.AddEndpointsApiExplorer();
+
+// Configure HttpClient for the InventoryService
 builder.Services.AddHttpClient("InventoryService", client =>
 {
-    client.BaseAddress = new Uri("http://localhost:5001"); // Update if needed
+    client.BaseAddress = new Uri("http://apigateway:7237");
 });
 
-// Configure OpenTelemetry for both Metrics and Tracing
+// Add OpenTelemetry for both Metrics and Tracing
 builder.Services.AddOpenTelemetry()
     .WithTracing(tracerProviderBuilder =>
     {
@@ -53,7 +71,7 @@ builder.Services.AddOpenTelemetry()
             .AddHttpClientInstrumentation()
             .AddOtlpExporter(options =>
             {
-                options.Endpoint = new Uri("http://localhost:4317"); // Adjust based on OTLP endpoint
+                options.Endpoint = new Uri("http://localhost:4317"); // Adjust based on OTLP endpoint (e.g., Tempo)
             })
             .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("InventoryService"));
     })
@@ -62,30 +80,65 @@ builder.Services.AddOpenTelemetry()
         metricProviderBuilder
             .AddAspNetCoreInstrumentation()
             .AddHttpClientInstrumentation()
-            .AddRuntimeInstrumentation() // Correct runtime instrumentation setup
-            .AddPrometheusExporter(); // Ensure PrometheusExporter is included
+            .AddRuntimeInstrumentation()
+            .AddPrometheusExporter();
     });
 
 // Build and configure the app
 var app = builder.Build();
 
+// Ensure database is created and migrated
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    try
+    {
+        var context = services.GetRequiredService<InventoryDbContext>();
+        context.Database.EnsureCreated();
+    }
+    catch (Exception ex)
+    {
+        var logger = services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "An error occurred while creating/migrating the database.");
+    }
+}
+
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        context.Response.StatusCode = 500;
+        context.Response.ContentType = "application/json";
+        var error = context.Features.Get<IExceptionHandlerFeature>();
+        if (error != null)
+        {
+            await context.Response.WriteAsync(
+                JsonSerializer.Serialize(new { error = "An error occurred." }));
+        }
+    });
+});
+
 // Map Prometheus endpoint for scraping metrics
 app.MapPrometheusScrapingEndpoint("/metrics");
 
-// Enable Swagger in development mode
+// Map health check endpoint
+app.MapHealthChecks("/health");
+
+// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
 {
-    app.UseSwagger(c => {
-        c.RouteTemplate = "swagger/{documentName}/swagger.json";
-    });
-    app.UseSwaggerUI(c => {
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "Inventory Service API V1");
         c.RoutePrefix = "swagger";
     });
 }
 
-//app.UseHttpsRedirection();
-app.UseAuthorization();
-app.MapControllers();
+app.UseRouting();
+app.UseEndpoints(endpoints =>
+{
+    endpoints.MapControllers();
+});
 
 app.Run();

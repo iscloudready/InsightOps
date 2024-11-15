@@ -4,8 +4,8 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 ARG BUILD_CONFIGURATION=Release
 USER root
 WORKDIR /app
-EXPOSE 8080
-EXPOSE 8081
+EXPOSE 80  # HTTP port
+EXPOSE 7265  # Optional, custom port (if required)
 
 # Install curl and wget for resource fetching and health checks
 RUN apt-get update \
@@ -36,4 +36,5 @@ RUN dotnet publish "./OrderService.csproj" -c $BUILD_CONFIGURATION -o /app/publi
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+ENV ASPNETCORE_ENVIRONMENT=Docker
 ENTRYPOINT ["dotnet", "OrderService.dll"]

@@ -226,7 +226,6 @@ datasources:
 '@
 }
 
-# Replace the entire Get-DockerComposeConfig function with this:
 function Get-DockerComposeConfig {
     return @'
 name: insightops
@@ -269,51 +268,42 @@ services:
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_orderservice
     environment:
-      - ASPNETCORE_ENVIRONMENT=Docker  # Set environment to Docker
-      - ASPNETCORE_URLS=http://+:80;https://+:8081
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_HTTP_PORTS=80
+      - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
     ports:
       - "${ORDERSERVICE_PORT:-7265}:80"
-      - "7266:8081"  # HTTPS on 8080
-    volumes:
-      - ./certs:/app/certs:ro
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:80/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s
       timeout: 30s
       retries: 3
       start_period: 40s
-    networks:
-      - default
 
   inventoryservice:
     build:
-      context: ./InventoryService 
+      context: ./InventoryService
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_inventoryservice
     environment:
-      - ASPNETCORE_ENVIRONMENT=Docker  # Set environment to Docker
-      - ASPNETCORE_URLS=http://+:80;https://+:8081
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
     ports:
       - "${INVENTORYSERVICE_PORT:-7070}:80"
-      - "7071:8080"  # HTTPS on 8080
-    volumes:
-      - ./certs:/app/certs:ro
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:80/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s
       timeout: 30s
       retries: 3
       start_period: 40s
-    networks:
-      - default
 
   apigateway:
     build:
@@ -321,24 +311,19 @@ services:
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_apigateway
     environment:
-      - ASPNETCORE_ENVIRONMENT=Docker  # Set environment to Docker
-      - ASPNETCORE_URLS=http://+:80;https://+:8081
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
     ports:
-      - "${APIGATEWAY_PORT:-7237}:80" 
-      - "7238:8080"  # HTTPS on 8080
-    volumes:
-      - ./certs:/app/certs:ro
+      - "${APIGATEWAY_PORT:-7237}:80"
     depends_on:
       - orderservice
       - inventoryservice
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:80/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s
       timeout: 30s
       retries: 3
       start_period: 40s
-    networks:
-      - default
 
   frontend:
     build:
@@ -346,23 +331,18 @@ services:
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_frontend
     environment:
-      - ASPNETCORE_ENVIRONMENT=Docker  # Set environment to Docker
-      - ASPNETCORE_URLS=http://+:80;https://+:8081
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
     ports:
       - "${FRONTEND_PORT:-7144}:80"
-      - "7145:8080"  # HTTPS on 8080
-    volumes:
-      - ./certs:/app/certs:ro
     depends_on:
       - apigateway
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:80/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s
       timeout: 30s
       retries: 3
       start_period: 40s
-    networks:
-      - default
 
   grafana:
     image: grafana/grafana:latest

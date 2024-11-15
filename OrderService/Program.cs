@@ -5,9 +5,24 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using OrderService.Repositories;
+using System.Reflection;
 using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configure swagger first
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Order Service API",
+        Version = "v1",
+        Description = "Order Service API Description"
+    });
+    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+    c.IncludeXmlComments(xmlPath);
+});
 
 builder.Configuration
     .SetBasePath(Directory.GetCurrentDirectory())
@@ -36,9 +51,10 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddControllers();
 
+builder.Services.AddHealthChecks();
+
 // Configure Swagger
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
 
 // Configure HttpClient for the OrderService
 builder.Services.AddHttpClient("OrderService", client =>
@@ -105,15 +121,24 @@ app.UseExceptionHandler(errorApp =>
 // Map Prometheus endpoint for scraping metrics
 app.MapPrometheusScrapingEndpoint("/metrics");
 
-// Keep HTTPS redirection for non-development environments
+// Map health check endpoint
+app.MapHealthChecks("/health");
+
+// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Order Service API V1");
+        c.RoutePrefix = "swagger";
+    });
 }
 
-app.UseHttpsRedirection();
-app.UseAuthorization();
-app.MapControllers();
+app.UseRouting();
+app.UseEndpoints(endpoints =>
+{
+    endpoints.MapControllers();
+});
 
 app.Run();

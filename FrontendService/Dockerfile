@@ -4,8 +4,8 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 ARG BUILD_CONFIGURATION=Release
 USER root
 WORKDIR /app
-EXPOSE 8080
-EXPOSE 8081
+EXPOSE 80  # HTTP port
+EXPOSE 7144  # Custom port (if required)
 
 # Install curl and wget for resource fetching and health checks
 RUN apt-get update \
@@ -14,7 +14,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Switch to a non-root user after installing necessary packages for security
-RUN useradd -m appuser && chown -R appuser /app
+RUN useradd -m -u 1001 -g 1001 appuser && chown -R appuser /app
 USER appuser
 
 # Build stage
@@ -36,4 +36,5 @@ RUN dotnet publish "./FrontendService.csproj" -c $BUILD_CONFIGURATION -o /app/pu
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+ENV ASPNETCORE_ENVIRONMENT=Docker
 ENTRYPOINT ["dotnet", "FrontendService.dll"]

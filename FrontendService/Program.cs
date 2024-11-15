@@ -1,7 +1,15 @@
 using Microsoft.AspNetCore.Builder;
+using OpenTelemetry;
+using OpenTelemetry.Extensions.Hosting;
+using OpenTelemetry.Instrumentation.AspNetCore;
+using OpenTelemetry.Instrumentation.Http;
 using System.Net.Http.Headers;
-using Polly;
-using Polly.Extensions.Http;
+using Microsoft.AspNetCore.Diagnostics;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using System.Reflection;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,46 +19,57 @@ builder.Configuration
     .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
     .AddEnvironmentVariables();
 
-// Configure Kestrel to listen on specified ports
-builder.WebHost.ConfigureKestrel(options =>
-{
-    options.ListenAnyIP(80); // HTTP on port 8080
-    //options.ListenAnyIP(8081, listenOptions => listenOptions.UseHttps()); // HTTPS on port 8081
-});
-
 // Add services to the container.
 builder.Services.AddControllersWithViews();
 
 // Configure HttpClient for API Gateway
 builder.Services.AddHttpClient("ApiGateway", client =>
 {
-    client.BaseAddress = new Uri("http://localhost:5000"); // API Gateway URL
+    client.BaseAddress = new Uri("http://localhost:5000");
     client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-})
-.AddTransientHttpErrorPolicy(policy =>
-    policy.WaitAndRetryAsync(3, _ => TimeSpan.FromMilliseconds(500)));
+});
 
 // Add health checks
 builder.Services.AddHealthChecks();
 
+// Add OpenTelemetry for tracing and metrics
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracerProviderBuilder =>
+    {
+        tracerProviderBuilder
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri("http://localhost:4317");
+            });
+    })
+    .WithMetrics(metricProviderBuilder =>
+    {
+        metricProviderBuilder
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddPrometheusExporter();
+    });
+
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (!app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler("/Home/Error");
-    app.UseHsts();
+    app.UseDeveloperExceptionPage();
 }
 
-//app.UseHttpsRedirection();
-app.UseStaticFiles();
 app.UseRouting();
-app.UseAuthorization();
-
-app.MapControllerRoute(
-    name: "default",
-    pattern: "{controller=Home}/{action=Index}/{id?}");
+app.UseStaticFiles(); // Serve static files
+app.UseEndpoints(endpoints =>
+{
+    endpoints.MapControllerRoute(
+        name: "default",
+        pattern: "{controller=Home}/{action=Index}/{id?}"); // Map MVC routes
+});
 
 app.MapHealthChecks("/health");
+app.MapPrometheusScrapingEndpoint("/metrics");
 
 app.Run();

@@ -19,16 +19,6 @@
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
     },
-    "https": {
-      "commandName": "Project",
-      "dotnetRunMessages": true,
-      "launchBrowser": true,
-      "launchUrl": "swagger",
-      "applicationUrl": "https://localhost:7265;http://localhost:5246",
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
-      }
-    },
     "IIS Express": {
       "commandName": "IISExpress",
       "launchBrowser": true,
@@ -43,11 +33,9 @@
       "launchUrl": "{Scheme}://{ServiceHost}:{ServicePort}/swagger",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "ASPNETCORE_HTTP_PORTS": "8080",
-        "ASPNETCORE_HTTPS_PORTS": "8081"
+        "ASPNETCORE_HTTP_PORTS": "8080"
       },
-      "publishAllPorts": true,
-      "useSSL": true
+      "publishAllPorts": true
     }
   }
 }

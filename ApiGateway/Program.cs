@@ -1,3 +1,17 @@
+using Microsoft.OpenApi.Models;
+using Microsoft.AspNetCore.Builder;
+using OpenTelemetry;
+using OpenTelemetry.Extensions.Hosting;
+using OpenTelemetry.Instrumentation.AspNetCore;
+using OpenTelemetry.Instrumentation.Http;
+using System.Net.Http.Headers;
+using Microsoft.AspNetCore.Diagnostics;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using System.Reflection;
+using System.Text.Json;
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration
@@ -6,17 +20,45 @@ builder.Configuration
     .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
     .AddEnvironmentVariables();
 
-// Configure Kestrel to listen on specified ports
-builder.WebHost.ConfigureKestrel(options =>
+// Add services to the container.
+builder.Services.AddControllers();
+
+builder.Services.AddHealthChecks();
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
 {
-    options.ListenAnyIP(80); // HTTP on port 8080
-    //options.ListenAnyIP(8081, listenOptions => listenOptions.UseHttps()); // HTTPS on port 8081
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "ApiGateway Service API",
+        Version = "v1",
+        Description = "ApiGateway Service API Description"
+    });
 });
 
-// Add services to the container.
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+// Configure OpenTelemetry
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracerProviderBuilder =>
+    {
+        tracerProviderBuilder
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri("http://localhost:4317");
+            });
+    })
+    .WithMetrics(metricProviderBuilder =>
+    {
+        metricProviderBuilder
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddPrometheusExporter();
+    });
+
+// Configure Prometheus scraping endpoint
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
@@ -33,6 +75,13 @@ if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docke
     });
 }
 
-//app.UseHttpsRedirection();
+app.UseRouting();
+app.UseEndpoints(endpoints =>
+{
+    endpoints.MapControllers();
+});
+
+app.MapHealthChecks("/health");
+app.MapPrometheusScrapingEndpoint("/metrics");
 
 app.Run();
