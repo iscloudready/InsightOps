@@ -12,6 +12,8 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+	  <Compile Remove="Data\Migrations\20241115082821_InitialOrderDbMigration.cs" />
+	  <Compile Remove="Data\Migrations\20241115082821_InitialOrderDbMigration.Designer.cs" />
 	  <Compile Remove="Models\OrderHealthCheck.cs" />
 	</ItemGroup>
 

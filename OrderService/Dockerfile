@@ -4,8 +4,8 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 ARG BUILD_CONFIGURATION=Release
 USER root
 WORKDIR /app
-EXPOSE 80  # HTTP port
-EXPOSE 7265  # Optional, custom port (if required)
+EXPOSE 80
+EXPOSE 7265
 
 # Install curl and wget for resource fetching and health checks
 RUN apt-get update \

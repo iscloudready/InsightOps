@@ -8,6 +8,8 @@ using InventoryService.Repositories;
 using InventoryService.Data; // Add this for DbInitializer
 using System.Reflection;
 using System.Text.Json;
+using InventoryService.Services;
+using InventoryService.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -45,7 +47,9 @@ builder.Services.AddDbContext<InventoryDbContext>(options =>
 });
 
 // Add InventoryRepository as a scoped service
-builder.Services.AddScoped<InventoryRepository>();
+// In Program.cs for both services
+builder.Services.AddScoped<IInventoryRepository, InventoryRepository>();
+builder.Services.AddScoped<InventoryService.Services.IInventoryService, InventoryService.Services.InventoryService>();
 
 // Add Authorization services
 builder.Services.AddAuthorization();

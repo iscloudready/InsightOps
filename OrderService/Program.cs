@@ -8,7 +8,8 @@ using OrderService.Repositories;
 using OrderService.Data; // Add this for DbInitializer
 using System.Reflection;
 using System.Text.Json;
-using OrderService.Data.Migrations;
+using OrderService.Interfaces;
+using OrderService.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -46,7 +47,8 @@ builder.Services.AddDbContext<OrderDbContext>(options =>
 });
 
 // Add OrderRepository as a scoped service
-builder.Services.AddScoped<OrderRepository>();
+builder.Services.AddScoped<IOrderRepository, OrderRepository>();
+builder.Services.AddScoped<OrderService.Services.IOrderService, OrderService.Services.OrderService>();
 
 // Add Authorization services
 builder.Services.AddAuthorization();
