@@ -9,8 +9,6 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using System.Net.Http.Headers;
-using System.Reflection;
-using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -55,17 +53,17 @@ builder.Services.AddOpenTelemetry()
             .AddPrometheusExporter();
     });
 
+// Disable Data Protection to suppress warnings
+builder.Services.AddDataProtection()
+    .DisableAutomaticKeyGeneration(); // Suppresses ephemeral key warning
+
 // Configure Kestrel to use HTTP only
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.ListenAnyIP(80); // HTTP on port 80
 });
 
-// Configure Data Protection to use in-memory storage
-//builder.Services.AddDataProtection()
-//    .SetApplicationName("YourAppName") // Optional: set a shared app name if multiple services need shared data protection keys
-//    .PersistKeysToInMemory(); // Store keys in memory to avoid persistence issues in Docker
-
+// Build the app
 var app = builder.Build();
 
 // Use the developer exception page in development mode
@@ -74,8 +72,7 @@ if (app.Environment.IsDevelopment())
     app.UseDeveloperExceptionPage();
 }
 
-// Remove HTTPS redirection middleware since we're using HTTP-only
-// app.UseHttpsRedirection();
+// **DO NOT add app.UseHttpsRedirection();**
 
 // Enable routing and static file serving if needed
 app.UseRouting();
