@@ -5,6 +5,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using InventoryService.Repositories;
+using InventoryService.Data; // Add this for DbInitializer
 using System.Reflection;
 using System.Text.Json;
 
@@ -87,19 +88,29 @@ builder.Services.AddOpenTelemetry()
 // Build and configure the app
 var app = builder.Build();
 
-// Ensure database is created and migrated
+// Enhanced database initialization with migrations and seeding
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
+    var logger = services.GetRequiredService<ILogger<Program>>();
+
     try
     {
+        logger.LogInformation("Initializing inventory database...");
         var context = services.GetRequiredService<InventoryDbContext>();
-        context.Database.EnsureCreated();
+
+        // Run migrations
+        await context.Database.MigrateAsync();
+        logger.LogInformation("Inventory database migration completed");
+
+        // Initialize seed data
+        await DbInitializer.InitializeAsync(context);
+        logger.LogInformation("Inventory database initialization completed successfully");
     }
     catch (Exception ex)
     {
-        var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred while creating/migrating the database.");
+        logger.LogError(ex, "An error occurred while initializing the inventory database");
+        throw; // Rethrow to stop application startup on database initialization failure
     }
 }
 

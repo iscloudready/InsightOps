@@ -1,4 +1,5 @@
 ﻿// Updated InventoryRepository
+using InventoryService.Data;
 using InventoryService.Models;
 using Microsoft.EntityFrameworkCore;
 

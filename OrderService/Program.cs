@@ -5,8 +5,10 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using OrderService.Repositories;
+using OrderService.Data; // Add this for DbInitializer
 using System.Reflection;
 using System.Text.Json;
+using OrderService.Data.Migrations;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -87,19 +89,29 @@ builder.Services.AddOpenTelemetry()
 // Build and configure the app
 var app = builder.Build();
 
-// Ensure database is created and migrated
+// Enhanced database initialization with migrations and seeding
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
+    var logger = services.GetRequiredService<ILogger<Program>>();
+
     try
     {
+        logger.LogInformation("Initializing database...");
         var context = services.GetRequiredService<OrderDbContext>();
-        context.Database.EnsureCreated();
+
+        // Run migrations
+        await context.Database.MigrateAsync();
+        logger.LogInformation("Database migration completed");
+
+        // Initialize seed data
+        await DbInitializer.InitializeAsync(context);
+        logger.LogInformation("Database initialization completed successfully");
     }
     catch (Exception ex)
     {
-        var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred while creating/migrating the database.");
+        logger.LogError(ex, "An error occurred while initializing the database");
+        throw; // Rethrow to stop application startup on database initialization failure
     }
 }
 

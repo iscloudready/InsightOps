@@ -1,6 +1,7 @@
 // Updated OrderRepository
 using OrderService.Models;
 using Microsoft.EntityFrameworkCore;
+using OrderService.Data;
 
 namespace OrderService.Repositories
 {
