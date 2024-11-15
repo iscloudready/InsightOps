@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.OpenApi.Models;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -13,13 +14,6 @@ builder.Configuration
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
     .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
     .AddEnvironmentVariables();
-
-// Configure Kestrel to listen on specified ports
-builder.WebHost.ConfigureKestrel(options =>
-{
-    options.ListenAnyIP(80); // HTTP on port 8080
-    //options.ListenAnyIP(8081, listenOptions => listenOptions.UseHttps()); // HTTPS on port 8081
-});
 
 // Configure PostgreSQL Database connection with retry policy
 builder.Services.AddDbContext<OrderDbContext>(options =>
@@ -111,19 +105,14 @@ app.UseExceptionHandler(errorApp =>
 // Map Prometheus endpoint for scraping metrics
 app.MapPrometheusScrapingEndpoint("/metrics");
 
-// Enable Swagger in development mode
+// Keep HTTPS redirection for non-development environments
 if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
 {
-    app.UseSwagger(c => {
-        c.RouteTemplate = "swagger/{documentName}/swagger.json";
-    });
-    app.UseSwaggerUI(c => {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Order Service API V1");
-        c.RoutePrefix = "swagger";
-    });
+    app.UseSwagger();
+    app.UseSwaggerUI();
 }
 
-//app.UseHttpsRedirection();
+app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();
 

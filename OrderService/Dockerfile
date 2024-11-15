@@ -5,7 +5,7 @@ ARG BUILD_CONFIGURATION=Release
 USER root
 WORKDIR /app
 EXPOSE 8080
-#EXPOSE 8081
+EXPOSE 8081
 
 # Install curl and wget for resource fetching and health checks
 RUN apt-get update \
