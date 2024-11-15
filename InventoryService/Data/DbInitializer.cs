@@ -13,19 +13,15 @@ namespace InventoryService.Data
         {
             try
             {
-                // Ensure the database is created only if it doesn't already exist
-                if (!await context.Database.EnsureCreatedAsync())
-                {
-                    Console.WriteLine("Database already exists, skipping initialization.");
-                    return;
-                }
-
-                // Run migrations to ensure the schema is up-to-date
+                // Apply migrations to ensure the schema is up-to-date
                 await context.Database.MigrateAsync();
+                Console.WriteLine("Database migrations applied successfully.");
 
                 // Seed data only if the InventoryItems table is empty
                 if (!context.InventoryItems.Any())
                 {
+                    Console.WriteLine("Seeding data into InventoryItems table...");
+
                     var items = new List<InventoryItem>
                     {
                         new InventoryItem
@@ -54,8 +50,9 @@ namespace InventoryService.Data
                         }
                     };
 
-                    context.InventoryItems.AddRange(items);
+                    await context.InventoryItems.AddRangeAsync(items);
                     await context.SaveChangesAsync();
+
                     Console.WriteLine("Database seeding completed.");
                 }
                 else
@@ -63,21 +60,22 @@ namespace InventoryService.Data
                     Console.WriteLine("InventoryItems table already contains data, skipping seeding.");
                 }
             }
-            catch (Npgsql.PostgresException ex) when (ex.SqlState == "42P07")
+            catch (DbUpdateException dbEx)
             {
-                Console.WriteLine($"PostgresException: Relation already exists - {ex.Message}");
-                // Log and continue without throwing, as this error may not be critical
+                Console.WriteLine($"Database update error: {dbEx.Message}");
+                // Log and handle errors related to data updates
+                throw;
             }
-            catch (InvalidOperationException ex)
+            catch (InvalidOperationException invEx)
             {
-                Console.WriteLine($"InvalidOperationException: {ex.Message}");
-                // This exception can occur if there are schema mismatches or EF issues.
-                throw; // Re-throw if you need to halt initialization on this error.
+                Console.WriteLine($"Invalid operation: {invEx.Message}");
+                // Log and rethrow exceptions related to invalid EF operations
+                throw;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"An error occurred during database initialization: {ex.Message}");
-                throw; // Rethrow to propagate the error if needed
+                Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+                throw;
             }
         }
     }

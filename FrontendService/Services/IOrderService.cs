@@ -7,10 +7,15 @@ using FrontendService.Models.Responses;
 // Add to both IInventoryService.cs and InventoryService.cs
 using FrontendService.Models.DTOs;
 
-public interface IOrderService
+// FrontendService/Services/IOrderService.cs
+namespace FrontendService.Services
 {
-    Task<IEnumerable<OrderDto>> GetAllOrdersAsync();
-    Task<OrderDto> GetOrderByIdAsync(int id);
-    Task<OrderResponse> CreateOrderAsync(CreateOrderDto order);
-    Task<OrderStatusResponse> GetOrderStatusAsync(int orderId);
+    public interface IOrderService
+    {
+        Task<IEnumerable<OrderDto>> GetAllOrdersAsync();
+        Task<OrderDto> GetOrderByIdAsync(int id);
+        Task<OrderResponse> CreateOrderAsync(CreateOrderDto order);
+        Task<OrderStatusResponse> GetOrderStatusAsync(int orderId);
+        Task<bool> UpdateOrderStatusAsync(int orderId, string status);
+    }
 }

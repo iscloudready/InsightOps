@@ -1,0 +1,332 @@
+﻿@using Frontend.Models
+@model DashboardViewModel
+
+<div class="container-fluid px-4">
+    <!-- Header Section -->
+    <div class="row my-4">
+        <div class="col-12">
+            <h1 class="display-5 fw-bold">Operations Dashboard</h1>
+            <p class="lead text-muted">Real-time Service Performance & Health</p>
+        </div>
+    </div>
+
+    <!-- Service Health Cards -->
+    <div class="row mb-4" id="serviceHealthCards">
+        <!-- Populated by JavaScript -->
+    </div>
+
+    <!-- Key Metrics -->
+    <div class="row g-4 mb-4">
+        <div class="col-xl-3 col-md-6">
+            <div class="card border-left-primary h-100">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-primary text-uppercase mb-1">Active Orders</div>
+                            <div class="h5 mb-0 fw-bold" id="activeOrdersCount">Loading...</div>
+                            <div class="text-muted small" id="ordersTrend"></div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-shopping-cart fa-2x text-primary-lighter"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="card border-left-success h-100">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-success text-uppercase mb-1">Inventory Items</div>
+                            <div class="h5 mb-0 fw-bold" id="inventoryCount">Loading...</div>
+                            <div class="text-danger small" id="lowStockAlert"></div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-warehouse fa-2x text-success-lighter"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="card border-left-info h-100">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-info text-uppercase mb-1">System Health</div>
+                            <div class="h5 mb-0 fw-bold" id="systemHealth">Loading...</div>
+                            <div class="text-muted small" id="uptimeInfo"></div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-heartbeat fa-2x text-info-lighter"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="card border-left-warning h-100">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-warning text-uppercase mb-1">Response Time</div>
+                            <div class="h5 mb-0 fw-bold" id="responseTime">Loading...</div>
+                            <div class="text-muted small" id="requestRate"></div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-tachometer-alt fa-2x text-warning-lighter"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Service Status and Resources -->
+    <div class="row mb-4">
+        <!-- Service Status Table -->
+        <div class="col-xl-8 col-lg-7">
+            <div class="card shadow mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="m-0 fw-bold text-primary">Service Status</h6>
+                    <button class="btn btn-sm btn-outline-primary" id="refreshStatus">
+                        <i class="fas fa-sync"></i> Refresh
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="servicesTable">
+                            <thead>
+                                <tr>
+                                    <th>Service</th>
+                                    <th>Status</th>
+                                    <th>Uptime</th>
+                                    <th>Response Time</th>
+                                    <th>Error Rate</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Populated by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Resource Usage -->
+        <div class="col-xl-4 col-lg-5">
+            <div class="card shadow mb-4">
+                <div class="card-header">
+                    <h6 class="m-0 fw-bold text-primary">Resource Usage</h6>
+                </div>
+                <div class="card-body">
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>CPU Usage</span>
+                            <span id="cpuUsageText">0%</span>
+                        </div>
+                        <div class="progress">
+                            <div id="cpuUsage" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>Memory Usage</span>
+                            <span id="memoryUsageText">0MB</span>
+                        </div>
+                        <div class="progress">
+                            <div id="memoryUsage" class="progress-bar bg-info" role="progressbar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>Network I/O</span>
+                            <span id="networkUsageText">0 KB/s</span>
+                        </div>
+                        <div class="progress">
+                            <div id="networkUsage" class="progress-bar bg-warning" role="progressbar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trends Charts -->
+    <div class="row">
+        <!-- Order Trends -->
+        <div class="col-xl-6">
+            <div class="card shadow mb-4">
+                <div class="card-header">
+                    <h6 class="m-0 fw-bold text-primary">Order Trends</h6>
+                </div>
+                <div class="card-body">
+                    <div id="orderTrendsChart" style="height: 300px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Inventory Levels -->
+        <div class="col-xl-6">
+            <div class="card shadow mb-4">
+                <div class="card-header">
+                    <h6 class="m-0 fw-bold text-primary">Inventory Levels</h6>
+                </div>
+                <div class="card-body">
+                    <div id="inventoryLevelsChart" style="height: 300px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        const updateDashboard = async () => {
+            try {
+                const [dashboardData, serviceStatus] = await Promise.all([
+                    fetch('/Home/GetDashboardData').then(r => r.json()),
+                    fetch('/Home/GetServiceStatus').then(r => r.json())
+                ]);
+
+                // Update metrics
+                document.getElementById('activeOrdersCount').textContent = dashboardData.activeOrders;
+                document.getElementById('inventoryCount').textContent = dashboardData.inventoryCount;
+                document.getElementById('systemHealth').textContent = dashboardData.systemHealth;
+                document.getElementById('responseTime').textContent = dashboardData.responseTime;
+
+                // Update resource usage
+                updateResourceUsage(dashboardData);
+
+                // Update service status table
+                updateServiceTable(serviceStatus);
+
+                // Update charts
+                updateCharts(dashboardData);
+
+                // Show low stock alerts
+                if (dashboardData.lowStockItems > 0) {
+                    document.getElementById('lowStockAlert').textContent =
+                        `${dashboardData.lowStockItems} items low on stock`;
+                }
+
+                // Update request rate
+                document.getElementById('requestRate').textContent =
+                    `${dashboardData.requestRate} requests/min`;
+
+                // Update uptime info
+                document.getElementById('uptimeInfo').textContent =
+                    `${Math.round(dashboardData.uptime)}% uptime`;
+
+            } catch (error) {
+                console.error('Error updating dashboard:', error);
+            }
+        };
+
+        const updateResourceUsage = (data) => {
+            // CPU Usage
+            const cpuBar = document.getElementById('cpuUsage');
+            const cpuText = document.getElementById('cpuUsageText');
+            cpuBar.style.width = `${data.cpuUsage}%`;
+            cpuText.textContent = `${data.cpuUsage}%`;
+
+            // Memory Usage
+            const memBar = document.getElementById('memoryUsage');
+            const memText = document.getElementById('memoryUsageText');
+            memBar.style.width = `${data.memoryUsage}%`;
+            memText.textContent = `${Math.round(data.memoryUsage * 1024)}MB`;
+
+            // Network Usage
+            const netBar = document.getElementById('networkUsage');
+            const netText = document.getElementById('networkUsageText');
+            netBar.style.width = `${data.networkUsage}%`;
+            netText.textContent = `${data.networkThroughput}/s`;
+        };
+
+        const updateServiceTable = (services) => {
+            const tbody = document.querySelector('#servicesTable tbody');
+            tbody.innerHTML = '';
+
+            services.forEach(service => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                            <td>${service.name}</td>
+                            <td>
+                                <span class="badge bg-${service.status === 'Healthy' ? 'success' : 'danger'}">
+                                    ${service.status}
+                                </span>
+                            </td>
+                            <td>${service.uptime}</td>
+                            <td>${service.metrics.AvgResponseTime}</td>
+                            <td>${service.metrics.ErrorRate}</td>
+                        `;
+                tbody.appendChild(row);
+            });
+        };
+
+        const updateCharts = (data) => {
+            // Order Trends Chart
+            const orderCtx = document.getElementById('orderTrendsChart');
+            if (!window.orderChart) {
+                window.orderChart = new Chart(orderCtx, {
+                    type: 'line',
+                    data: {
+                        labels: data.orderTrends.map(d => d.time),
+                        datasets: [{
+                            label: 'Orders',
+                            data: data.orderTrends.map(d => d.count),
+                            borderColor: '#4e73df'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false
+                    }
+                });
+            } else {
+                window.orderChart.data.labels = data.orderTrends.map(d => d.time);
+                window.orderChart.data.datasets[0].data = data.orderTrends.map(d => d.count);
+                window.orderChart.update();
+            }
+
+            // Inventory Levels Chart
+            const inventoryCtx = document.getElementById('inventoryLevelsChart');
+            if (!window.inventoryChart) {
+                window.inventoryChart = new Chart(inventoryCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.inventoryTrends.map(d => d.item),
+                        datasets: [{
+                            label: 'Stock Level',
+                            data: data.inventoryTrends.map(d => d.quantity),
+                            backgroundColor: '#1cc88a'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false
+                    }
+                });
+            } else {
+                window.inventoryChart.data.labels = data.inventoryTrends.map(d => d.item);
+                window.inventoryChart.data.datasets[0].data = data.inventoryTrends.map(d => d.quantity);
+                window.inventoryChart.update();
+            }
+        };
+
+        // Initialize dashboard
+        updateDashboard();
+
+        // Refresh every 30 seconds
+        setInterval(updateDashboard, 30000);
+
+        // Manual refresh handler
+        document.getElementById('refreshStatus').addEventListener('click', updateDashboard);
+    </script>
+}

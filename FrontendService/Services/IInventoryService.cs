@@ -6,10 +6,16 @@ using FrontendService.Models.Responses;
 
 // Add to both IInventoryService.cs and InventoryService.cs
 using FrontendService.Models.DTOs;
+// FrontendService/Services/IInventoryService.cs
 
-public interface IInventoryService
+namespace FrontendService.Services
 {
-    Task<IEnumerable<InventoryItemDto>> GetAllItemsAsync();
-    Task<IEnumerable<InventoryItemDto>> GetLowStockItemsAsync();
-    Task<InventoryItemDto> GetItemByIdAsync(int id);
+    public interface IInventoryService
+    {
+        Task<IEnumerable<InventoryItemDto>> GetAllItemsAsync();
+        Task<InventoryItemDto> GetItemByIdAsync(int id);
+        Task<IEnumerable<InventoryItemDto>> GetLowStockItemsAsync();
+        Task<InventoryItemDto> UpdateStockAsync(int id, int quantity);
+        Task<InventoryItemDto> CreateItemAsync(InventoryItemDto item);
+    }
 }

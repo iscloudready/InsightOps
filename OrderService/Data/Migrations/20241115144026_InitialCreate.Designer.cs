@@ -12,8 +12,8 @@ using OrderService.Data;
 namespace OrderService.Data.Migrations
 {
     [DbContext(typeof(OrderDbContext))]
-    [Migration("20241115082821_InitialOrderDbMigration")]
-    partial class InitialOrderDbMigration
+    [Migration("20241115144026_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)

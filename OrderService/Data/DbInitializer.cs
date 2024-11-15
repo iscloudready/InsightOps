@@ -13,19 +13,15 @@ namespace OrderService.Data
         {
             try
             {
-                // Ensure the database is created only if it doesn't already exist
-                if (!await context.Database.EnsureCreatedAsync())
-                {
-                    Console.WriteLine("Database already exists, skipping initialization.");
-                    return;
-                }
-
-                // Check if the database schema is up-to-date
+                // Apply migrations to ensure the schema is up-to-date
                 await context.Database.MigrateAsync();
+                Console.WriteLine("Database migrations applied successfully.");
 
                 // Seed data only if the Orders table is empty
                 if (!context.Orders.Any())
                 {
+                    Console.WriteLine("Seeding data into Orders table...");
+
                     var orders = new List<Order>
                     {
                         new Order
@@ -46,8 +42,9 @@ namespace OrderService.Data
                         }
                     };
 
-                    context.Orders.AddRange(orders);
+                    await context.Orders.AddRangeAsync(orders);
                     await context.SaveChangesAsync();
+
                     Console.WriteLine("Database seeding completed.");
                 }
                 else
@@ -55,21 +52,22 @@ namespace OrderService.Data
                     Console.WriteLine("Orders table already contains data, skipping seeding.");
                 }
             }
-            catch (Npgsql.PostgresException ex) when (ex.SqlState == "42P07")
+            catch (DbUpdateException dbEx)
             {
-                Console.WriteLine($"PostgresException: Relation already exists - {ex.Message}");
-                // Log and continue without throwing, as this error may not be critical
+                Console.WriteLine($"Database update error: {dbEx.Message}");
+                // Handle database update issues, such as unique constraint violations
+                throw;
             }
-            catch (InvalidOperationException ex)
+            catch (InvalidOperationException invEx)
             {
-                Console.WriteLine($"InvalidOperationException: {ex.Message}");
-                // This exception can occur if there are schema mismatches or EF issues.
-                throw; // Re-throw if you need to halt initialization on this error.
+                Console.WriteLine($"Invalid operation: {invEx.Message}");
+                // Handle invalid EF operations, such as schema mismatches
+                throw;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"An error occurred during database initialization: {ex.Message}");
-                throw; // Rethrow to propagate the error if needed
+                Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+                throw;
             }
         }
     }
