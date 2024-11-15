@@ -2,30 +2,27 @@
     ViewData["Title"] = "Operations Dashboard";
 }
 
-<div class="container-fluid px-4">
-    <!-- Header Section -->
-    <div class="row my-4">
-        <div class="col-12">
-            <h1 class="display-5 fw-bold">Operations Control Center</h1>
-            <p class="lead text-muted">Microservices Health & Performance Monitoring</p>
+<div class="container-fluid p-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="h3 mb-0 text-gray-800">Operations Control Center</h1>
+            <p class="text-muted">Microservices Health & Performance Monitoring</p>
+        </div>
+        <div>
+            <button class="btn btn-primary" onclick="refreshDashboard()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
         </div>
     </div>
 
-    <!-- Quick Stats Cards -->
     <div class="row g-4 mb-4">
         <div class="col-xl-3 col-md-6">
-            <div class="card border-left-primary h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs fw-bold text-primary text-uppercase mb-1">
-                                Active Orders
-                            </div>
-                            <div class="h5 mb-0 fw-bold text-gray-800" id="activeOrdersCount">
-                                <span class="placeholder-glow">
-                                    <span class="placeholder col-6"></span>
-                                </span>
-                            </div>
+            <div class="card shadow h-100">
+                <div class="card-body border-left-primary">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-primary text-uppercase mb-1">Active Orders</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800" id="activeOrdersCount">0</div>
                         </div>
                         <div class="col-auto">
                             <i class="fas fa-shopping-cart fa-2x text-gray-300"></i>
@@ -36,18 +33,12 @@
         </div>
 
         <div class="col-xl-3 col-md-6">
-            <div class="card border-left-success h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs fw-bold text-success text-uppercase mb-1">
-                                Inventory Items
-                            </div>
-                            <div class="h5 mb-0 fw-bold text-gray-800" id="inventoryCount">
-                                <span class="placeholder-glow">
-                                    <span class="placeholder col-6"></span>
-                                </span>
-                            </div>
+            <div class="card shadow h-100">
+                <div class="card-body border-left-success">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-success text-uppercase mb-1">Inventory Items</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800" id="inventoryCount">0</div>
                         </div>
                         <div class="col-auto">
                             <i class="fas fa-warehouse fa-2x text-gray-300"></i>
@@ -58,18 +49,12 @@
         </div>
 
         <div class="col-xl-3 col-md-6">
-            <div class="card border-left-info h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs fw-bold text-info text-uppercase mb-1">
-                                System Health
-                            </div>
-                            <div class="h5 mb-0 fw-bold text-gray-800" id="systemHealth">
-                                <span class="placeholder-glow">
-                                    <span class="placeholder col-6"></span>
-                                </span>
-                            </div>
+            <div class="card shadow h-100">
+                <div class="card-body border-left-info">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-info text-uppercase mb-1">System Health</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800" id="systemHealth">-</div>
                         </div>
                         <div class="col-auto">
                             <i class="fas fa-heartbeat fa-2x text-gray-300"></i>
@@ -80,18 +65,12 @@
         </div>
 
         <div class="col-xl-3 col-md-6">
-            <div class="card border-left-warning h-100 py-2">
-                <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs fw-bold text-warning text-uppercase mb-1">
-                                Response Time
-                            </div>
-                            <div class="h5 mb-0 fw-bold text-gray-800" id="responseTime">
-                                <span class="placeholder-glow">
-                                    <span class="placeholder col-6"></span>
-                                </span>
-                            </div>
+            <div class="card shadow h-100">
+                <div class="card-body border-left-warning">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-warning text-uppercase mb-1">Response Time</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800" id="responseTime">0ms</div>
                         </div>
                         <div class="col-auto">
                             <i class="fas fa-tachometer-alt fa-2x text-gray-300"></i>
@@ -102,16 +81,16 @@
         </div>
     </div>
 
-    <!-- Service Status Section -->
-    <div class="row mb-4">
-        <div class="col-xl-8 col-lg-7">
+    <div class="row">
+        <div class="col-xl-8">
             <div class="card shadow mb-4">
-                <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <div class="card-header py-3 d-flex justify-content-between align-items-center">
                     <h6 class="m-0 fw-bold text-primary">Microservices Status</h6>
+                    <div id="lastUpdated" class="text-muted small"></div>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
-                        <table class="table table-bordered" id="servicesTable">
+                        <table class="table table-hover" id="servicesTable">
                             <thead>
                                 <tr>
                                     <th>Service</th>
@@ -121,21 +100,21 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr>
+                                <tr id="orderServiceRow">
                                     <td>Order Service</td>
-                                    <td><span class="badge bg-success">Healthy</span></td>
+                                    <td><span class="badge bg-secondary">Unknown</span></td>
                                     <td id="orderServiceUptime">-</td>
                                     <td id="orderServiceLastUpdate">-</td>
                                 </tr>
-                                <tr>
+                                <tr id="inventoryServiceRow">
                                     <td>Inventory Service</td>
-                                    <td><span class="badge bg-success">Healthy</span></td>
+                                    <td><span class="badge bg-secondary">Unknown</span></td>
                                     <td id="inventoryServiceUptime">-</td>
                                     <td id="inventoryServiceLastUpdate">-</td>
                                 </tr>
-                                <tr>
+                                <tr id="frontendServiceRow">
                                     <td>Frontend Service</td>
-                                    <td><span class="badge bg-success">Healthy</span></td>
+                                    <td><span class="badge bg-secondary">Unknown</span></td>
                                     <td id="frontendServiceUptime">-</td>
                                     <td id="frontendServiceLastUpdate">-</td>
                                 </tr>
@@ -146,31 +125,39 @@
             </div>
         </div>
 
-        <div class="col-xl-4 col-lg-5">
+        <div class="col-xl-4">
             <div class="card shadow mb-4">
                 <div class="card-header py-3">
                     <h6 class="m-0 fw-bold text-primary">System Resources</h6>
                 </div>
                 <div class="card-body">
                     <div class="mb-4">
-                        <p class="mb-2">CPU Usage</p>
-                        <div class="progress">
-                            <div class="progress-bar" role="progressbar" style="width: 0%" id="cpuUsage"
-                                 aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>CPU Usage</span>
+                            <span id="cpuUsageText">0%</span>
+                        </div>
+                        <div class="progress" style="height: 10px;">
+                            <div class="progress-bar" role="progressbar" id="cpuUsage" style="width: 0%"></div>
                         </div>
                     </div>
+
                     <div class="mb-4">
-                        <p class="mb-2">Memory Usage</p>
-                        <div class="progress">
-                            <div class="progress-bar bg-info" role="progressbar" style="width: 0%" id="memoryUsage"
-                                 aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>Memory Usage</span>
+                            <span id="memoryUsageText">0%</span>
+                        </div>
+                        <div class="progress" style="height: 10px;">
+                            <div class="progress-bar bg-info" role="progressbar" id="memoryUsage" style="width: 0%"></div>
                         </div>
                     </div>
+
                     <div>
-                        <p class="mb-2">Storage Usage</p>
-                        <div class="progress">
-                            <div class="progress-bar bg-warning" role="progressbar" style="width: 0%" id="storageUsage"
-                                 aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>Storage Usage</span>
+                            <span id="storageUsageText">0%</span>
+                        </div>
+                        <div class="progress" style="height: 10px;">
+                            <div class="progress-bar bg-warning" role="progressbar" id="storageUsage" style="width: 0%"></div>
                         </div>
                     </div>
                 </div>
@@ -180,57 +167,77 @@
 </div>
 
 @section Scripts {
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/js/all.min.js"></script>
-        <script>
-            async function updateDashboard() {
-                try {
-                    // Fetch dashboard data
-                    const dashboardResponse = await fetch('/Home/GetDashboardData');
-                    if (dashboardResponse.ok) {
-                        const dashboardData = await dashboardResponse.json();
+<script>
+let updateInterval;
 
-                        // Update dashboard metrics
-                        document.getElementById('activeOrdersCount').textContent = dashboardData.activeOrders;
-                        document.getElementById('inventoryCount').textContent = dashboardData.inventoryCount;
-                        document.getElementById('systemHealth').textContent = dashboardData.systemHealth;
-                        document.getElementById('responseTime').textContent = dashboardData.responseTime;
-                    }
+async function updateDashboard() {
+    try {
+        const dashboardResponse = await fetch('/Home/GetDashboardData');
+        const statusResponse = await fetch('/Home/GetServiceStatus');
 
-                    // Fetch service status
-                    const statusResponse = await fetch('/Home/GetServiceStatus');
-                    if (statusResponse.ok) {
-                        const serviceStatus = await statusResponse.json();
+        if (dashboardResponse.ok && statusResponse.ok) {
+            const dashboardData = await dashboardResponse.json();
+            const serviceStatus = await statusResponse.json();
 
-                        // Update service status table
-                        serviceStatus.forEach(service => {
-                            const row = document.querySelector(`tr:has(td:contains('${service.name}'))`);
-                            if (row) {
-                                const statusBadge = row.querySelector('.badge');
-                                statusBadge.className = `badge bg-${service.status === 'Healthy' ? 'success' : 'danger'}`;
-                                statusBadge.textContent = service.status;
+            // Update metrics
+            document.getElementById('activeOrdersCount').textContent = dashboardData.activeOrders;
+            document.getElementById('inventoryCount').textContent = dashboardData.inventoryCount;
+            document.getElementById('systemHealth').textContent = dashboardData.systemHealth;
+            document.getElementById('responseTime').textContent = dashboardData.responseTime;
 
-                                const uptimeCell = row.querySelector(`#${service.name.toLowerCase().replace(' ', '')}ServiceUptime`);
-                                const lastUpdateCell = row.querySelector(`#${service.name.toLowerCase().replace(' ', '')}ServiceLastUpdate`);
-
-                                // Calculate uptime
-                                uptimeCell.textContent = '100%'; // You can implement real uptime calculation
-                                lastUpdateCell.textContent = new Date(service.lastUpdated).toLocaleString();
-                            }
-                        });
-                    }
-
-                    // Update system resources (you can implement real metrics here)
-                    document.getElementById('cpuUsage').style.width = '60%';
-                    document.getElementById('memoryUsage').style.width = '45%';
-                    document.getElementById('storageUsage').style.width = '30%';
-
-                } catch (error) {
-                    console.error('Error updating dashboard:', error);
+            // Update service statuses
+            serviceStatus.forEach(service => {
+                const serviceId = service.name.toLowerCase().replace(' ', '');
+                const row = document.getElementById(`${serviceId}ServiceRow`);
+                if (row) {
+                    const statusBadge = row.querySelector('.badge');
+                    const isHealthy = service.status === 'Healthy';
+                    
+                    statusBadge.className = `badge ${isHealthy ? 'bg-success' : 'bg-danger'}`;
+                    statusBadge.textContent = service.status;
+                    
+                    document.getElementById(`${serviceId}ServiceUptime`).textContent = service.uptime || '100%';
+                    document.getElementById(`${serviceId}ServiceLastUpdate`).textContent = 
+                        new Date(service.lastUpdated).toLocaleString();
                 }
-            }
+            });
 
-            // Update every 5 seconds
-            setInterval(updateDashboard, 5000);
-            updateDashboard(); // Initial update
-        </script>
+            // Update system resources
+            updateResourceUsage('cpu', dashboardData.cpuUsage || 60);
+            updateResourceUsage('memory', dashboardData.memoryUsage || 45);
+            updateResourceUsage('storage', dashboardData.storageUsage || 30);
+
+            // Update last refresh time
+            document.getElementById('lastUpdated').textContent = 
+                `Last updated: ${new Date().toLocaleTimeString()}`;
+        }
+    } catch (error) {
+        console.error('Error updating dashboard:', error);
+    }
+}
+
+function updateResourceUsage(type, value) {
+    const bar = document.getElementById(`${type}Usage`);
+    const text = document.getElementById(`${type}UsageText`);
+    if (bar && text) {
+        bar.style.width = `${value}%`;
+        text.textContent = `${value}%`;
+    }
+}
+
+function refreshDashboard() {
+    updateDashboard();
+}
+
+// Initial update and start interval
+document.addEventListener('DOMContentLoaded', () => {
+    updateDashboard();
+    updateInterval = setInterval(updateDashboard, 5000);
+});
+
+// Clean up interval when leaving the page
+window.addEventListener('beforeunload', () => {
+    clearInterval(updateInterval);
+});
+</script>
 }

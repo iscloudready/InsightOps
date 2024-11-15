@@ -1,38 +1,47 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
-using Microsoft.Extensions.Hosting;
 using OpenTelemetry;
-using OpenTelemetry.Extensions.Hosting;
-using OpenTelemetry.Instrumentation.AspNetCore;
-using OpenTelemetry.Instrumentation.Http;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using Serilog;
+using Serilog.Events;
 using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Load configuration files
-builder.Configuration
-    .SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
-    .AddEnvironmentVariables();
+// Configure Serilog
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .Enrich.FromLogContext()
+    .WriteTo.Console()
+    .WriteTo.Http(
+        requestUri: builder.Configuration["Serilog:Loki:Url"] ?? "http://loki:3100/loki/api/v1/push",
+        queueLimitBytes: null)
+    .CreateLogger();
+
+builder.Host.UseSerilog();
 
 // Add services to the container
-builder.Services.AddControllersWithViews();
+builder.Services.AddControllersWithViews()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+    });
 
 // Configure HttpClient for API Gateway
 builder.Services.AddHttpClient("ApiGateway", client =>
 {
-    client.BaseAddress = new Uri("http://localhost:5000");
+    client.BaseAddress = new Uri(builder.Configuration["ServiceUrls:ApiGateway"] ?? "http://apigateway:5011");
     client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 });
 
 // Configure Health Checks
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks()
+    .AddUrlGroup(new Uri(builder.Configuration["ServiceUrls:ApiGateway"] + "/health"), "api-gateway");
 
-// Configure OpenTelemetry for tracing and metrics
+// Configure OpenTelemetry
 builder.Services.AddOpenTelemetry()
     .WithTracing(tracerProviderBuilder =>
     {
@@ -41,8 +50,13 @@ builder.Services.AddOpenTelemetry()
             .AddHttpClientInstrumentation()
             .AddOtlpExporter(options =>
             {
-                options.Endpoint = new Uri("http://localhost:4317");
-            });
+                options.Endpoint = new Uri("http://tempo:4317");
+            })
+            .SetResourceBuilder(
+                ResourceBuilder.CreateDefault()
+                    .AddService("Frontend")
+                    .AddTelemetrySdk()
+                    .AddEnvironmentVariableDetector());
     })
     .WithMetrics(metricProviderBuilder =>
     {
@@ -53,32 +67,26 @@ builder.Services.AddOpenTelemetry()
             .AddPrometheusExporter();
     });
 
-// Disable Data Protection to suppress warnings
-builder.Services.AddDataProtection()
-    .DisableAutomaticKeyGeneration(); // Suppresses ephemeral key warning
-
-// Configure Kestrel to use HTTP only
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenAnyIP(80); // HTTP on port 80
+    options.ListenAnyIP(5010); // Changed to port 5010 for frontend
 });
 
-// Build the app
+// Disable Data Protection warnings
+builder.Services.AddDataProtection()
+    .DisableAutomaticKeyGeneration();
+
 var app = builder.Build();
 
-// Use the developer exception page in development mode
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
 {
     app.UseDeveloperExceptionPage();
 }
 
-// **DO NOT add app.UseHttpsRedirection();**
-
-// Enable routing and static file serving if needed
+app.UseStaticFiles();
 app.UseRouting();
-app.UseStaticFiles(); // Serve static files if required
+app.UseSerilogRequestLogging();
 
-// Configure endpoints
 app.UseEndpoints(endpoints =>
 {
     endpoints.MapControllerRoute(
@@ -88,5 +96,4 @@ app.UseEndpoints(endpoints =>
     endpoints.MapPrometheusScrapingEndpoint("/metrics");
 });
 
-// Run the application
 app.Run();

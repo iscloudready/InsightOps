@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using FrontendService.Models;
 using System.Text.Json;
 using Frontend.Models;
+using FrontendService.Models.DTOs;
 
 namespace FrontendService.Controllers;
 

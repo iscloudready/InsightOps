@@ -1,5 +1,6 @@
 ﻿// Frontend/Models/DashboardViewModel.cs
 using FrontendService.Models;
+using FrontendService.Models.DTOs;
 
 namespace Frontend.Models
 {

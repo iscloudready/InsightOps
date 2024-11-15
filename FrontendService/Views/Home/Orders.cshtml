@@ -1,0 +1,123 @@
+﻿@model IEnumerable<OrderDto>
+@using FrontendService.Models.DTOs
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Orders Management</h1>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createOrderModal">
+            <i class="fas fa-plus"></i> New Order
+        </button>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <i class="fas fa-table me-1"></i>
+            Orders List
+        </div>
+        <div class="card-body">
+            <table id="ordersTable" class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Order ID</th>
+                        <th>Item</th>
+                        <th>Quantity</th>
+                        <th>Total Price</th>
+                        <th>Status</th>
+                        <th>Order Date</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var order in Model)
+                    {
+                        <tr>
+                            <td>@order.Id</td>
+                            <td>@order.ItemName</td>
+                            <td>@order.Quantity</td>
+                            <td>@order.TotalPrice.ToString("C")</td>
+                            <td>
+                                <span class="badge @(order.Status == "Completed" ? "bg-success" :
+                                                   order.Status == "Pending" ? "bg-warning" : "bg-secondary")">
+                                    @order.Status
+                                </span>
+                            </td>
+                            <td>@order.OrderDate.ToString("g")</td>
+                            <td>
+                                <button class="btn btn-sm btn-info" onclick="viewOrder(@order.Id)">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Create Order Modal -->
+<div class="modal fade" id="createOrderModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Create New Order</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form asp-action="CreateOrder" method="post">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Item Name</label>
+                        <select name="ItemName" class="form-select" required>
+                            @foreach (var item in ViewBag.InventoryItems ?? new List<InventoryItemDto>())
+                            {
+                                <option value="@item.Name">@item.Name (@item.Quantity in stock)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Quantity</label>
+                        <input type="number" name="Quantity" class="form-control" required min="1" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Order</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        $(document).ready(function () {
+            $('#ordersTable').DataTable({
+                order: [[5, 'desc']], // Sort by date descending
+                pageLength: 25
+            });
+        });
+
+        function viewOrder(orderId) {
+            // Implement order details view
+            alert('Order details for ID: ' + orderId);
+        }
+
+        // Show success/error messages from TempData
+        @if (TempData["Success"] != null)
+        {
+            <text>
+                    $(document).ready(function() {
+                        alert('@TempData["Success"]');
+                        });
+            </text>
+        }
+        @if (TempData["Error"] != null)
+        {
+            <text>
+                    $(document).ready(function() {
+                        alert('@TempData["Error"]');
+                        });
+            </text>
+        }
+    </script>
+}

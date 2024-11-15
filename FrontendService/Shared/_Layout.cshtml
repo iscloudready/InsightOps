@@ -1,8 +1,7 @@
-﻿@using FrontendService.Models.DTOs
-@{
-    var currentController = ViewContext.RouteData.Values["Controller"]?.ToString();
-    var currentAction = ViewContext.RouteData.Values["Action"]?.ToString();
-}
+﻿@using Microsoft.AspNetCore.Mvc.ViewFeatures
+@using Frontend.Models
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -25,25 +24,25 @@
                 <div class="collapse navbar-collapse" id="navbarNav">
                     <ul class="navbar-nav">
                         <li class="nav-item">
-                            <a class="nav-link @(currentController == "Home" && currentAction == "Index" ? "active" : "")"
+                            <a class="nav-link @(ViewContext.RouteData.Values["Action"]?.ToString() == "Index" ? "active" : "")"
                                asp-controller="Home" asp-action="Index">
                                 <i class="fas fa-tachometer-alt"></i> Dashboard
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link @(currentController == "Home" && currentAction == "Orders" ? "active" : "")"
+                            <a class="nav-link @(ViewContext.RouteData.Values["Action"]?.ToString() == "Orders" ? "active" : "")"
                                asp-controller="Home" asp-action="Orders">
                                 <i class="fas fa-shopping-cart"></i> Orders
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link @(currentController == "Home" && currentAction == "Inventory" ? "active" : "")"
+                            <a class="nav-link @(ViewContext.RouteData.Values["Action"]?.ToString() == "Inventory" ? "active" : "")"
                                asp-controller="Home" asp-action="Inventory">
                                 <i class="fas fa-warehouse"></i> Inventory
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link @(currentController == "DockerManagement" ? "active" : "")"
+                            <a class="nav-link @(ViewContext.RouteData.Values["Controller"]?.ToString() == "DockerManagement" ? "active" : "")"
                                asp-controller="DockerManagement" asp-action="Index">
                                 <i class="fab fa-docker"></i> Docker
                             </a>
