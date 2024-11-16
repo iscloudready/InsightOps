@@ -1,11 +1,15 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
+using static FrontendService.Services.Monitoring.MetricsCollector;
 
 namespace FrontendService.Services.Monitoring
 {
     public class SystemMetricsCollector
     {
+        private readonly ConcurrentDictionary<string, Queue<MetricDataPoint>> _metricHistory = new();
+        private const int MAX_HISTORY_POINTS = 100;
         private readonly ILogger<SystemMetricsCollector> _logger;
         private PerformanceCounter? _cpuCounter;
         private PerformanceCounter? _ramCounter;
@@ -241,13 +245,48 @@ namespace FrontendService.Services.Monitoring
 
         private long GetTotalPhysicalMemory()
         {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            try
             {
-                return new Microsoft.VisualBasic.Devices.ComputerInfo().TotalPhysicalMemory;
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    return GetWindowsTotalMemory();
+                }
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                {
+                    return GetLinuxTotalMemory();
+                }
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                {
+                    return GetMacTotalMemory();
+                }
             }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            catch (Exception ex)
             {
-                try
+                _logger.LogError(ex, "Error getting total physical memory");
+            }
+
+            return 0;
+        }
+
+        private long GetWindowsTotalMemory()
+        {
+            try
+            {
+                var gcMemoryInfo = GC.GetGCMemoryInfo();
+                return gcMemoryInfo.TotalAvailableMemoryBytes;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting Windows total memory");
+                return 0;
+            }
+        }
+
+        private long GetLinuxTotalMemory()
+        {
+            try
+            {
+                if (File.Exists("/proc/meminfo"))
                 {
                     var meminfo = File.ReadAllLines("/proc/meminfo");
                     var totalLine = meminfo.FirstOrDefault(l => l.StartsWith("MemTotal:"));
@@ -260,13 +299,26 @@ namespace FrontendService.Services.Monitoring
                         }
                     }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error reading total physical memory on Linux");
-                }
             }
-
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reading total physical memory on Linux");
+            }
             return 0;
+        }
+
+        private long GetMacTotalMemory()
+        {
+            try
+            {
+                var gcMemoryInfo = GC.GetGCMemoryInfo();
+                return gcMemoryInfo.TotalAvailableMemoryBytes;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting macOS total memory");
+                return 0;
+            }
         }
 
         private SystemMetrics GetFallbackMetrics()
@@ -278,12 +330,58 @@ namespace FrontendService.Services.Monitoring
                 StorageUsage = 0
             };
         }
-    }
 
-    public class SystemMetrics
-    {
-        public double CpuUsage { get; set; }
-        public double MemoryUsage { get; set; }
-        public double StorageUsage { get; set; }
+        public void RecordMetric(string name, double value)
+        {
+            var queue = _metricHistory.GetOrAdd(name, _ => new Queue<MetricDataPoint>());
+
+            lock (queue)
+            {
+                queue.Enqueue(new MetricDataPoint { Timestamp = DateTime.UtcNow, Value = value });
+                while (queue.Count > MAX_HISTORY_POINTS)
+                {
+                    queue.Dequeue();
+                }
+            }
+        }
+
+        public double GetAverageResponseTime()
+        {
+            if (_metricHistory.TryGetValue("api_response_time", out var queue))
+            {
+                lock (queue)
+                {
+                    return queue.Count > 0 ? queue.Average(p => p.Value) : 0;
+                }
+            }
+            return 0;
+        }
+
+        public double GetRequestRate()
+        {
+            if (_metricHistory.TryGetValue("api_response_time", out var queue))
+            {
+                lock (queue)
+                {
+                    if (queue.Count < 2) return 0;
+                    var timeSpan = queue.Last().Timestamp - queue.First().Timestamp;
+                    return timeSpan.TotalMinutes > 0 ? queue.Count / timeSpan.TotalMinutes : 0;
+                }
+            }
+            return 0;
+        }
+
+        private class MetricDataPoint
+        {
+            public DateTime Timestamp { get; set; }
+            public double Value { get; set; }
+        }
+
+        public class SystemMetrics
+        {
+            public double CpuUsage { get; set; }
+            public double MemoryUsage { get; set; }
+            public double StorageUsage { get; set; }
+        }
     }
 }

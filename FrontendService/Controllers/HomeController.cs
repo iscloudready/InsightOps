@@ -40,13 +40,17 @@ public class HomeController : Controller
             var baseUrl = _configuration["ServiceUrls:ApiGateway"] ?? "http://localhost:5011";
             client.BaseAddress = new Uri(baseUrl);
 
-            // Generate simulated metrics since API might not be available
-            var metrics = GenerateSimulatedMetrics();
+            // Get real system metrics
+            var systemMetrics = _metricsCollector.GetSystemMetrics();
             var orders = new List<OrderDto>();
             var inventory = new List<InventoryItemDto>();
+            var apiHealthy = true;
 
             try
             {
+                // Start timing the API requests
+                var stopwatch = Stopwatch.StartNew();
+
                 // Make multiple requests in parallel
                 var tasks = new[]
                 {
@@ -55,44 +59,78 @@ public class HomeController : Controller
             };
 
                 var results = await Task.WhenAll(tasks);
+                stopwatch.Stop();
+
+                // Update response time with actual value
+                var actualResponseTime = stopwatch.ElapsedMilliseconds;
 
                 if (results[0].IsSuccessStatusCode)
+                {
                     orders = await results[0].Content.ReadFromJsonAsync<List<OrderDto>>() ?? new List<OrderDto>();
+                }
+                else
+                {
+                    apiHealthy = false;
+                    _logger.LogWarning("Orders API returned status code: {StatusCode}", results[0].StatusCode);
+                }
 
                 if (results[1].IsSuccessStatusCode)
+                {
                     inventory = await results[1].Content.ReadFromJsonAsync<List<InventoryItemDto>>() ?? new List<InventoryItemDto>();
+                }
+                else
+                {
+                    apiHealthy = false;
+                    _logger.LogWarning("Inventory API returned status code: {StatusCode}", results[1].StatusCode);
+                }
 
-                _logger.LogInformation("Retrieved {OrderCount} orders and {InventoryCount} inventory items",
-                    orders.Count, inventory.Count);
+                _logger.LogInformation("Retrieved {OrderCount} orders and {InventoryCount} inventory items in {ResponseTime}ms",
+                    orders.Count, inventory.Count, actualResponseTime);
+
+                // Record metrics
+                _metricsCollector.RecordMetric("api_response_time", actualResponseTime);
+                _metricsCollector.RecordMetric("active_orders", orders.Count);
+                _metricsCollector.RecordMetric("inventory_items", inventory.Count);
             }
             catch (Exception ex)
             {
+                apiHealthy = false;
                 _logger.LogWarning(ex, "Failed to fetch data from API, using empty collections");
             }
 
+            // Calculate trends based on historical metrics if available
+            var orderTrends = await GetOrderTrends(orders);
+            var inventoryTrends = await GetInventoryTrends(inventory);
+
             var data = new
             {
-                activeOrders = orders.Count,
+                // Order metrics
+                activeOrders = orders.Count(o => o.Status != "Completed"),
                 pendingOrders = orders.Count(o => o.Status == "Pending"),
                 completedOrders = orders.Count(o => o.Status == "Completed"),
                 totalOrderValue = orders.Sum(o => o.TotalPrice),
 
+                // Inventory metrics
                 inventoryCount = inventory.Count,
                 lowStockItems = inventory.Count(i => i.Quantity <= 10),
                 totalInventoryValue = inventory.Sum(i => i.Price * i.Quantity),
                 outOfStockItems = inventory.Count(i => i.Quantity == 0),
 
-                systemHealth = "Healthy", // Will be determined by health checks
-                responseTime = $"{metrics.AverageResponseTime}ms",
-                cpuUsage = metrics.CpuUsage,
-                memoryUsage = metrics.MemoryUsage,
-                storageUsage = metrics.StorageUsage,
-                requestRate = metrics.RequestRate,
-                errorRate = metrics.ErrorRate,
+                // System health and performance
+                systemHealth = apiHealthy ? "Healthy" : "Degraded",
+                responseTime = $"{_metricsCollector.GetAverageResponseTime():F0}ms",
+                cpuUsage = systemMetrics.CpuUsage,
+                memoryUsage = systemMetrics.MemoryUsage,
+                storageUsage = systemMetrics.StorageUsage,
+                requestRate = _metricsCollector.GetRequestRate(),
+                errorRate = apiHealthy ? 0 : 100,
 
-                // Add trend data for charts
-                orderTrends = GenerateOrderTrends(),
-                inventoryTrends = GenerateInventoryTrends()
+                // Trend data
+                orderTrends = orderTrends,
+                inventoryTrends = inventoryTrends,
+
+                // Last update time
+                lastUpdated = DateTime.UtcNow
             };
 
             return Json(data);
@@ -102,6 +140,45 @@ public class HomeController : Controller
             _logger.LogError(ex, "Error fetching dashboard data");
             return StatusCode(500, new { error = "Error fetching dashboard data", details = ex.Message });
         }
+    }
+
+    private async Task<List<OrderTrendData>> GetOrderTrends(List<OrderDto> currentOrders)
+    {
+        var trends = new List<OrderTrendData>();
+        var now = DateTime.UtcNow;
+
+        // Group current orders by hour
+        var hourlyOrders = currentOrders
+            .Where(o => o.OrderDate >= now.AddHours(-24))
+            .GroupBy(o => o.OrderDate.Hour)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        // Create 24-hour trend data
+        for (int i = 24; i >= 0; i--)
+        {
+            var hour = now.AddHours(-i);
+            trends.Add(new OrderTrendData
+            {
+                Time = hour,
+                Count = hourlyOrders.GetValueOrDefault(hour.Hour, 0)
+            });
+        }
+
+        return trends;
+    }
+
+    private async Task<List<InventoryTrendData>> GetInventoryTrends(List<InventoryItemDto> currentInventory)
+    {
+        // Get top 5 items by value
+        return currentInventory
+            .OrderByDescending(i => i.Price * i.Quantity)
+            .Take(5)
+            .Select(i => new InventoryTrendData
+            {
+                Item = i.Name,
+                Quantity = i.Quantity
+            })
+            .ToList();
     }
 
     private List<OrderTrendData> GenerateOrderTrends()
