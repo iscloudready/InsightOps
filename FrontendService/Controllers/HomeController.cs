@@ -11,6 +11,7 @@ using System.Linq;
 using FrontendService.Models.DTOs;
 using System.Net.Http.Json;
 using FrontendService.Services.Monitoring;
+using System.Text.Json;
 
 public class HomeController : Controller
 {
@@ -36,109 +37,183 @@ public class HomeController : Controller
     {
         try
         {
+            // Add service URL logging at the start
+            _logger.LogInformation("Service URLs Configuration:");
+            _logger.LogInformation("API Gateway URL: {Url}", _configuration["ServiceUrls:ApiGateway"]);
+            _logger.LogInformation("Order Service URL: {Url}", _configuration["ServiceUrls:OrderService"]);
+            _logger.LogInformation("Inventory Service URL: {Url}", _configuration["ServiceUrls:InventoryService"]);
+
             var client = _clientFactory.CreateClient("ApiGateway");
-            var baseUrl = _configuration["ServiceUrls:ApiGateway"] ?? "http://localhost:5011";
+            var baseUrl = _configuration["ServiceUrls:ApiGateway"];
+            _logger.LogInformation("Using API Gateway URL: {BaseUrl}", baseUrl);
+
+            // Add configuration validation
+            if (string.IsNullOrEmpty(baseUrl))
+            {
+                _logger.LogWarning("API Gateway URL not configured, using default");
+                baseUrl = "http://localhost:7237";
+            }
+
+            // Fallback to default URL if not configured
             client.BaseAddress = new Uri(baseUrl);
 
             // Get real system metrics
             var systemMetrics = _metricsCollector.GetSystemMetrics();
+            _logger.LogInformation("System Metrics - CPU: {CPU}%, Memory: {Memory}%, Storage: {Storage}%",
+                systemMetrics.CpuUsage,
+                systemMetrics.MemoryUsage,
+                systemMetrics.StorageUsage);
+
             var orders = new List<OrderDto>();
             var inventory = new List<InventoryItemDto>();
             var apiHealthy = true;
+            var responseTime = 0L;
 
             try
             {
-                // Start timing the API requests
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                 var stopwatch = Stopwatch.StartNew();
 
-                // Make multiple requests in parallel
-                var tasks = new[]
-                {
-                client.GetAsync("/api/gateway/orders"),
-                client.GetAsync("/api/gateway/inventory")
-            };
+                _logger.LogInformation("Making API requests to endpoints: /api/gateway/orders and /api/gateway/inventory");
 
-                var results = await Task.WhenAll(tasks);
+                // Make multiple requests in parallel with timeout
+                var orderTask = client.GetAsync("/api/gateway/orders", cts.Token);
+                var inventoryTask = client.GetAsync("/api/gateway/inventory", cts.Token);
+
+                await Task.WhenAll(orderTask, inventoryTask);
+                var orderResponse = await orderTask;
+                var inventoryResponse = await inventoryTask;
+
                 stopwatch.Stop();
+                responseTime = stopwatch.ElapsedMilliseconds;
 
-                // Update response time with actual value
-                var actualResponseTime = stopwatch.ElapsedMilliseconds;
-
-                if (results[0].IsSuccessStatusCode)
+                // Process Orders
+                if (orderResponse.IsSuccessStatusCode)
                 {
-                    orders = await results[0].Content.ReadFromJsonAsync<List<OrderDto>>() ?? new List<OrderDto>();
+                    var content = await orderResponse.Content.ReadAsStringAsync();
+                    _logger.LogInformation("Orders API Raw Response: {Content}", content);
+
+                    try
+                    {
+                        orders = await orderResponse.Content.ReadFromJsonAsync<List<OrderDto>>(cancellationToken: cts.Token)
+                            ?? new List<OrderDto>();
+                        _logger.LogInformation("Successfully parsed {Count} orders", orders.Count);
+                    }
+                    catch (JsonException ex)
+                    {
+                        _logger.LogError(ex, "Failed to parse orders JSON response");
+                        apiHealthy = false;
+                    }
                 }
                 else
                 {
                     apiHealthy = false;
-                    _logger.LogWarning("Orders API returned status code: {StatusCode}", results[0].StatusCode);
+                    _logger.LogWarning("Orders API failed with status code: {StatusCode}", orderResponse.StatusCode);
+                    var errorContent = await orderResponse.Content.ReadAsStringAsync();
+                    _logger.LogWarning("Orders API error response: {Error}", errorContent);
                 }
 
-                if (results[1].IsSuccessStatusCode)
+                // Process Inventory
+                if (inventoryResponse.IsSuccessStatusCode)
                 {
-                    inventory = await results[1].Content.ReadFromJsonAsync<List<InventoryItemDto>>() ?? new List<InventoryItemDto>();
+                    var content = await inventoryResponse.Content.ReadAsStringAsync();
+                    _logger.LogInformation("Inventory API Raw Response: {Content}", content);
+
+                    try
+                    {
+                        inventory = await inventoryResponse.Content.ReadFromJsonAsync<List<InventoryItemDto>>(cancellationToken: cts.Token)
+                            ?? new List<InventoryItemDto>();
+                        _logger.LogInformation("Successfully parsed {Count} inventory items", inventory.Count);
+                    }
+                    catch (JsonException ex)
+                    {
+                        _logger.LogError(ex, "Failed to parse inventory JSON response");
+                        apiHealthy = false;
+                    }
                 }
                 else
                 {
                     apiHealthy = false;
-                    _logger.LogWarning("Inventory API returned status code: {StatusCode}", results[1].StatusCode);
+                    _logger.LogWarning("Inventory API failed with status code: {StatusCode}", inventoryResponse.StatusCode);
+                    var errorContent = await inventoryResponse.Content.ReadAsStringAsync();
+                    _logger.LogWarning("Inventory API error response: {Error}", errorContent);
                 }
-
-                _logger.LogInformation("Retrieved {OrderCount} orders and {InventoryCount} inventory items in {ResponseTime}ms",
-                    orders.Count, inventory.Count, actualResponseTime);
 
                 // Record metrics
-                _metricsCollector.RecordMetric("api_response_time", actualResponseTime);
+                _metricsCollector.RecordMetric("api_response_time", responseTime);
                 _metricsCollector.RecordMetric("active_orders", orders.Count);
                 _metricsCollector.RecordMetric("inventory_items", inventory.Count);
+
+                _logger.LogInformation("Preparing dashboard response data");
+
+                // Generate response data
+                var data = new
+                {
+                    // Order metrics
+                    activeOrders = orders.Count(o => o.Status != "Completed"),
+                    pendingOrders = orders.Count(o => o.Status == "Pending"),
+                    completedOrders = orders.Count(o => o.Status == "Completed"),
+                    totalOrderValue = orders.Sum(o => o.TotalPrice),
+
+                    // Inventory metrics
+                    inventoryCount = inventory.Count,
+                    lowStockItems = inventory.Count(i => i.Quantity <= 10),
+                    totalInventoryValue = inventory.Sum(i => i.Price * i.Quantity),
+                    outOfStockItems = inventory.Count(i => i.Quantity == 0),
+
+                    // System health and performance
+                    systemHealth = apiHealthy ? "Healthy" : "Degraded",
+                    responseTime = $"{responseTime}ms",
+                    cpuUsage = systemMetrics.CpuUsage,
+                    memoryUsage = systemMetrics.MemoryUsage,
+                    storageUsage = systemMetrics.StorageUsage,
+                    requestRate = _metricsCollector.GetRequestRate(),
+                    errorRate = apiHealthy ? 0 : 100,
+
+                    // For debugging
+                    apiStatus = new
+                    {
+                        ordersEndpoint = orderResponse.StatusCode.ToString(),
+                        inventoryEndpoint = inventoryResponse.StatusCode.ToString(),
+                        responseTimeMs = responseTime,
+                        healthy = apiHealthy
+                    },
+
+                    // Trend data (if APIs are healthy)
+                    orderTrends = apiHealthy ? await GetOrderTrends(orders) : GenerateOrderTrends(),
+                    inventoryTrends = apiHealthy ? await GetInventoryTrends(inventory) : GenerateInventoryTrends(),
+
+                    // Last update time
+                    lastUpdated = DateTime.UtcNow
+                };
+
+                _logger.LogInformation("Dashboard data generated successfully. API Status: {Status}, Orders: {OrderCount}, Inventory: {InventoryCount}",
+                    apiHealthy ? "Healthy" : "Degraded",
+                    orders.Count,
+                    inventory.Count);
+
+                return Json(data);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("API request timeout after {Timeout} seconds", 10);
+                return StatusCode(504, new { error = "API Gateway timeout", details = "Request timed out" });
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "HTTP request error when calling API Gateway");
+                return StatusCode(502, new { error = "API Gateway error", details = ex.Message });
             }
             catch (Exception ex)
             {
-                apiHealthy = false;
-                _logger.LogWarning(ex, "Failed to fetch data from API, using empty collections");
+                _logger.LogError(ex, "Unexpected error fetching dashboard data: {Message}", ex.Message);
+                return StatusCode(500, new { error = "Internal server error", details = ex.Message });
             }
-
-            // Calculate trends based on historical metrics if available
-            var orderTrends = await GetOrderTrends(orders);
-            var inventoryTrends = await GetInventoryTrends(inventory);
-
-            var data = new
-            {
-                // Order metrics
-                activeOrders = orders.Count(o => o.Status != "Completed"),
-                pendingOrders = orders.Count(o => o.Status == "Pending"),
-                completedOrders = orders.Count(o => o.Status == "Completed"),
-                totalOrderValue = orders.Sum(o => o.TotalPrice),
-
-                // Inventory metrics
-                inventoryCount = inventory.Count,
-                lowStockItems = inventory.Count(i => i.Quantity <= 10),
-                totalInventoryValue = inventory.Sum(i => i.Price * i.Quantity),
-                outOfStockItems = inventory.Count(i => i.Quantity == 0),
-
-                // System health and performance
-                systemHealth = apiHealthy ? "Healthy" : "Degraded",
-                responseTime = $"{_metricsCollector.GetAverageResponseTime():F0}ms",
-                cpuUsage = systemMetrics.CpuUsage,
-                memoryUsage = systemMetrics.MemoryUsage,
-                storageUsage = systemMetrics.StorageUsage,
-                requestRate = _metricsCollector.GetRequestRate(),
-                errorRate = apiHealthy ? 0 : 100,
-
-                // Trend data
-                orderTrends = orderTrends,
-                inventoryTrends = inventoryTrends,
-
-                // Last update time
-                lastUpdated = DateTime.UtcNow
-            };
-
-            return Json(data);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching dashboard data");
-            return StatusCode(500, new { error = "Error fetching dashboard data", details = ex.Message });
+            _logger.LogError(ex, "Critical error in GetDashboardData: {Message}", ex.Message);
+            return StatusCode(500, new { error = "Critical error", details = ex.Message });
         }
     }
 

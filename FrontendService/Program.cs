@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Diagnostics;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -12,11 +13,20 @@ using Polly.Extensions.Http;
 using Polly.Timeout;
 using FrontendService.Services.Monitoring;
 using FrontendService.Extensions;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add after builder initialization
-builder.Services.AddApplicationServices(builder.Configuration);
+// Configure logging first
+builder.Services.AddLogging(loggingBuilder =>
+{
+    loggingBuilder.ClearProviders();
+    loggingBuilder.AddConsole();
+    loggingBuilder.AddDebug();
+    loggingBuilder.SetMinimumLevel(builder.Environment.IsDevelopment() ?
+        LogLevel.Debug : LogLevel.Information);
+});
 
 // Configure Serilog based on environment
 var lokiUrl = builder.Environment.IsDevelopment()
@@ -27,9 +37,10 @@ Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .Enrich.FromLogContext()
-    .Enrich.WithEnvironmentName()  // Instead of WithMachineName
+    .Enrich.WithEnvironmentName()
     .Enrich.WithThreadId()
-    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .WriteTo.Console(
+        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
     .WriteTo.Http(
         requestUri: $"{lokiUrl}/loki/api/v1/push",
         queueLimitBytes: null)
@@ -45,29 +56,22 @@ builder.Services.AddControllersWithViews()
         options.JsonSerializerOptions.PropertyNamingPolicy = null;
     });
 
-// Configure HttpClient for API Gateway with environment-specific base URL
-var apiGatewayUrl = builder.Environment.IsDevelopment()
-    ? "http://localhost:7237"
-    : "http://apigateway:80";
+// Configure services and logging based on environment
+if (builder.Environment.IsDevelopment() || builder.Environment.EnvironmentName == "Docker")
+{
+    builder.Services.Configure<LoggerFilterOptions>(options =>
+    {
+        options.MinLevel = LogLevel.Debug;
+    });
+}
 
-// With this enhanced version
-builder.Services.AddHttpClient("ApiGateway", client => {
-    client.BaseAddress = new Uri(apiGatewayUrl);
-    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-})
-.AddTransientHttpErrorPolicy(p =>
-    p.WaitAndRetryAsync(3, _ => TimeSpan.FromSeconds(1)))
-.AddTransientHttpErrorPolicy(p =>
-    p.CircuitBreakerAsync(5, TimeSpan.FromSeconds(30)));
+// Add application services
+builder.Services.AddApplicationServices(builder.Configuration);
 
 // Configure monitoring endpoints
 var tempoEndpoint = builder.Environment.IsDevelopment()
     ? "http://localhost:4317"
     : "http://tempo:4317";
-
-// Configure Health Checks
-builder.Services.AddHealthChecks()
-    .AddUrlGroup(new Uri($"{apiGatewayUrl}/health"), "api-gateway");
 
 // Configure OpenTelemetry
 builder.Services.AddOpenTelemetry()
@@ -101,20 +105,39 @@ builder.WebHost.ConfigureKestrel(options =>
     options.ListenAnyIP(5010);
 });
 
-builder.Services.AddSingleton<MetricsCollector>();
-// Add this after other service registrations
-builder.Services.AddSingleton<SystemMetricsCollector>();
-
 // Disable Data Protection warnings
 builder.Services.AddDataProtection()
     .DisableAutomaticKeyGeneration();
 
 var app = builder.Build();
 
-// Configure error handling
+// Configure error handling with detailed messages
 if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
 {
     app.UseDeveloperExceptionPage();
+    app.UseExceptionHandler(errorApp =>
+    {
+        errorApp.Run(async context =>
+        {
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+            context.Response.StatusCode = 500;
+            context.Response.ContentType = "application/json";
+
+            var exception = context.Features.Get<IExceptionHandlerFeature>();
+            if (exception != null)
+            {
+                logger.LogError(exception.Error, "An unhandled exception occurred");
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    error = "An error occurred.",
+                    detail = exception.Error.Message,
+                    stackTrace = exception.Error.StackTrace,
+                    path = context.Request.Path,
+                    timestamp = DateTime.UtcNow
+                });
+            }
+        });
+    });
 }
 else
 {
@@ -123,7 +146,17 @@ else
 
 app.UseStaticFiles();
 app.UseRouting();
-app.UseSerilogRequestLogging();
+app.UseSerilogRequestLogging(options =>
+{
+    options.MessageTemplate =
+        "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
+});
+
+// Configure middleware
+app.UseHttpsRedirection();
+app.UseStaticFiles();
+app.UseRouting();
+app.UseAuthorization();
 
 // Configure endpoints
 app.UseEndpoints(endpoints =>
@@ -134,6 +167,35 @@ app.UseEndpoints(endpoints =>
 
     endpoints.MapHealthChecks("/health");
     endpoints.MapPrometheusScrapingEndpoint("/metrics");
+});
+
+// Add custom middleware for request logging
+app.Use(async (context, next) =>
+{
+    var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+    try
+    {
+        logger.LogInformation(
+            "Request {Method} {Path} started",
+            context.Request.Method,
+            context.Request.Path);
+
+        await next();
+
+        logger.LogInformation(
+            "Request {Method} {Path} completed with status {StatusCode}",
+            context.Request.Method,
+            context.Request.Path,
+            context.Response.StatusCode);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex,
+            "Request {Method} {Path} failed",
+            context.Request.Method,
+            context.Request.Path);
+        throw;
+    }
 });
 
 try

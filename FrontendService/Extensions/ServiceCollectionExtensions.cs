@@ -1,5 +1,4 @@
-﻿// FrontendService/Extensions/ServiceCollectionExtensions.cs
-using System;
+﻿using System;
 using System.Net.Http.Headers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,6 +7,7 @@ using Polly;
 using Polly.Extensions.Http;
 using Polly.Timeout;
 using FrontendService.Services;
+using FrontendService.Services.Monitoring;
 using System.Net.Http;
 using Polly.Retry;
 using Polly.CircuitBreaker;
@@ -16,22 +16,43 @@ namespace FrontendService.Extensions
 {
     public static class ServiceCollectionExtensions
     {
+        private static readonly ILogger<Program> _logger;
+
         public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
         {
+            // Register HTTP clients with resilience policies
             services.AddHttpClient("ApiGateway", client =>
             {
                 var apiGatewayUrl = configuration["ServiceUrls:ApiGateway"]
                     ?? throw new InvalidOperationException("ApiGateway URL not configured");
-
                 client.BaseAddress = new Uri(apiGatewayUrl);
                 client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                client.Timeout = TimeSpan.FromSeconds(10);
             })
             .AddPolicyHandler(GetRetryPolicy())
             .AddPolicyHandler(GetCircuitBreakerPolicy());
 
+            // Register services
             services.AddMemoryCache();
+            services.AddSingleton<SystemMetricsCollector>();
+            services.AddSingleton<MetricsCollector>();
             services.AddScoped<IOrderService, OrderService>();
             services.AddScoped<IInventoryService, InventoryService>();
+
+            // Register health checks
+            services.AddHealthChecks()
+                .AddUrlGroup(
+                    new Uri($"{configuration["ServiceUrls:ApiGateway"]}/health"),
+                    name: "api-gateway",
+                    tags: new[] { "gateway" })
+                .AddUrlGroup(
+                    new Uri($"{configuration["ServiceUrls:OrderService"]}/health"),
+                    name: "orders-api",
+                    tags: new[] { "orders" })
+                .AddUrlGroup(
+                    new Uri($"{configuration["ServiceUrls:InventoryService"]}/health"),
+                    name: "inventory-api",
+                    tags: new[] { "inventory" });
 
             return services;
         }
@@ -41,13 +62,13 @@ namespace FrontendService.Extensions
             return HttpPolicyExtensions
                 .HandleTransientHttpError()
                 .Or<TimeoutRejectedException>()
-                .WaitAndRetryAsync(3, retryAttempt =>
-                    TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
+                .WaitAndRetryAsync(
+                    retryCount: 3,
+                    sleepDurationProvider: retryAttempt =>
+                        TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
                     onRetry: (exception, timeSpan, retryCount, context) =>
                     {
-                        var logger = context.GetService<ILogger>();
-                        logger?.LogWarning("Retry {RetryCount} after {TimeSpan}s delay due to {ExceptionType}",
-                            retryCount, timeSpan.TotalSeconds, exception.Exception?.GetType().Name);
+                        Console.WriteLine($"Retry {retryCount} after {timeSpan.TotalSeconds}s delay due to {exception.Exception?.GetType().Name}");
                     });
         }
 
@@ -55,15 +76,15 @@ namespace FrontendService.Extensions
         {
             return HttpPolicyExtensions
                 .HandleTransientHttpError()
-                .CircuitBreakerAsync(5, TimeSpan.FromSeconds(30),
+                .CircuitBreakerAsync(
+                    handledEventsAllowedBeforeBreaking: 5,
+                    durationOfBreak: TimeSpan.FromSeconds(30),
                     onBreak: (exception, duration) =>
                     {
-                        // Log circuit breaker opening
                         Console.WriteLine($"Circuit breaker opened for {duration.TotalSeconds}s due to {exception.Exception?.Message}");
                     },
                     onReset: () =>
                     {
-                        // Log circuit breaker reset
                         Console.WriteLine("Circuit breaker reset");
                     });
         }
