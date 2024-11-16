@@ -10,21 +10,25 @@ using System.Collections.Generic;
 using System.Linq;
 using FrontendService.Models.DTOs;
 using System.Net.Http.Json;
+using FrontendService.Services.Monitoring;
 
 public class HomeController : Controller
 {
     private readonly IHttpClientFactory _clientFactory;
     private readonly ILogger<HomeController> _logger;
     private readonly IConfiguration _configuration;
+    private readonly SystemMetricsCollector _metricsCollector;
 
     public HomeController(
         IHttpClientFactory clientFactory,
         ILogger<HomeController> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        SystemMetricsCollector metricsCollector)
     {
         _clientFactory = clientFactory;
         _logger = logger;
         _configuration = configuration;
+        _metricsCollector = metricsCollector;
     }
 
     [HttpGet]

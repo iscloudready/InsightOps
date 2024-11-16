@@ -102,6 +102,8 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 builder.Services.AddSingleton<MetricsCollector>();
+// Add this after other service registrations
+builder.Services.AddSingleton<SystemMetricsCollector>();
 
 // Disable Data Protection warnings
 builder.Services.AddDataProtection()
