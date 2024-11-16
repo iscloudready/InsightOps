@@ -9,12 +9,16 @@
             <p class="text-muted">Microservices Health & Performance Monitoring</p>
         </div>
         <div>
-            <button class="btn btn-primary" onclick="refreshDashboard()">
+            <button class="btn btn-primary" data-refresh>
                 <i class="fas fa-sync-alt"></i> Refresh
             </button>
         </div>
     </div>
 
+    <!-- Alert Container for Errors -->
+    <div id="alertContainer" class="mb-4"></div>
+
+    <!-- Metrics Cards -->
     <div class="row g-4 mb-4">
         <div class="col-xl-3 col-md-6">
             <div class="card shadow h-100">
@@ -23,6 +27,7 @@
                         <div class="col">
                             <div class="text-xs fw-bold text-primary text-uppercase mb-1">Active Orders</div>
                             <div class="h5 mb-0 fw-bold text-gray-800" id="activeOrdersCount">0</div>
+                            <div class="text-muted small" id="ordersTrend"></div>
                         </div>
                         <div class="col-auto">
                             <i class="fas fa-shopping-cart fa-2x text-gray-300"></i>
@@ -39,6 +44,7 @@
                         <div class="col">
                             <div class="text-xs fw-bold text-success text-uppercase mb-1">Inventory Items</div>
                             <div class="h5 mb-0 fw-bold text-gray-800" id="inventoryCount">0</div>
+                            <div class="text-danger small" id="lowStockAlert"></div>
                         </div>
                         <div class="col-auto">
                             <i class="fas fa-warehouse fa-2x text-gray-300"></i>
@@ -55,6 +61,7 @@
                         <div class="col">
                             <div class="text-xs fw-bold text-info text-uppercase mb-1">System Health</div>
                             <div class="h5 mb-0 fw-bold text-gray-800" id="systemHealth">-</div>
+                            <div class="text-muted small" id="healthDetails"></div>
                         </div>
                         <div class="col-auto">
                             <i class="fas fa-heartbeat fa-2x text-gray-300"></i>
@@ -71,6 +78,7 @@
                         <div class="col">
                             <div class="text-xs fw-bold text-warning text-uppercase mb-1">Response Time</div>
                             <div class="h5 mb-0 fw-bold text-gray-800" id="responseTime">0ms</div>
+                            <div class="text-muted small" id="requestRate"></div>
                         </div>
                         <div class="col-auto">
                             <i class="fas fa-tachometer-alt fa-2x text-gray-300"></i>
@@ -81,7 +89,9 @@
         </div>
     </div>
 
+    <!-- Services Status and Resources -->
     <div class="row">
+        <!-- Services Status Table -->
         <div class="col-xl-8">
             <div class="card shadow mb-4">
                 <div class="card-header py-3 d-flex justify-content-between align-items-center">
@@ -100,23 +110,23 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr id="orderServiceRow">
+                                <tr id="orderserviceRow">
                                     <td>Order Service</td>
                                     <td><span class="badge bg-secondary">Unknown</span></td>
-                                    <td id="orderServiceUptime">-</td>
-                                    <td id="orderServiceLastUpdate">-</td>
+                                    <td>-</td>
+                                    <td>-</td>
                                 </tr>
-                                <tr id="inventoryServiceRow">
+                                <tr id="inventoryserviceRow">
                                     <td>Inventory Service</td>
                                     <td><span class="badge bg-secondary">Unknown</span></td>
-                                    <td id="inventoryServiceUptime">-</td>
-                                    <td id="inventoryServiceLastUpdate">-</td>
+                                    <td>-</td>
+                                    <td>-</td>
                                 </tr>
-                                <tr id="frontendServiceRow">
+                                <tr id="frontendserviceRow">
                                     <td>Frontend Service</td>
                                     <td><span class="badge bg-secondary">Unknown</span></td>
-                                    <td id="frontendServiceUptime">-</td>
-                                    <td id="frontendServiceLastUpdate">-</td>
+                                    <td>-</td>
+                                    <td>-</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -125,6 +135,7 @@
             </div>
         </div>
 
+        <!-- System Resources -->
         <div class="col-xl-4">
             <div class="card shadow mb-4">
                 <div class="card-header py-3">
@@ -162,82 +173,179 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Additional Health Info Card -->
+            <div class="card shadow">
+                <div class="card-header py-3">
+                    <h6 class="m-0 fw-bold text-primary">Health Summary</h6>
+                </div>
+                <div class="card-body">
+                    <div id="healthSummary">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Total Services:</span>
+                            <span id="totalServices">3</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Healthy Services:</span>
+                            <span id="healthyServices">0</span>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <span>System Uptime:</span>
+                            <span id="systemUptime">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
 @section Scripts {
-<script>
-let updateInterval;
+    <script>
+        let updateInterval;
 
-async function updateDashboard() {
-    try {
-        const dashboardResponse = await fetch('/Home/GetDashboardData');
-        const statusResponse = await fetch('/Home/GetServiceStatus');
+        async function updateDashboard() {
+            try {
+                const [dashboardData, serviceStatus] = await Promise.all([
+                    fetch('/Home/GetDashboardData').then(r => r.json()),
+                    fetch('/Home/GetServiceStatus').then(r => r.json())
+                ]);
 
-        if (dashboardResponse.ok && statusResponse.ok) {
-            const dashboardData = await dashboardResponse.json();
-            const serviceStatus = await statusResponse.json();
+                // Update key metrics cards
+                updateMetricsCards(dashboardData);
 
-            // Update metrics
-            document.getElementById('activeOrdersCount').textContent = dashboardData.activeOrders;
-            document.getElementById('inventoryCount').textContent = dashboardData.inventoryCount;
-            document.getElementById('systemHealth').textContent = dashboardData.systemHealth;
-            document.getElementById('responseTime').textContent = dashboardData.responseTime;
+                // Update service statuses
+                updateServiceTable(serviceStatus);
 
-            // Update service statuses
-            serviceStatus.forEach(service => {
-                const serviceId = service.name.toLowerCase().replace(' ', '');
-                const row = document.getElementById(`${serviceId}ServiceRow`);
-                if (row) {
-                    const statusBadge = row.querySelector('.badge');
-                    const isHealthy = service.status === 'Healthy';
-                    
-                    statusBadge.className = `badge ${isHealthy ? 'bg-success' : 'bg-danger'}`;
-                    statusBadge.textContent = service.status;
-                    
-                    document.getElementById(`${serviceId}ServiceUptime`).textContent = service.uptime || '100%';
-                    document.getElementById(`${serviceId}ServiceLastUpdate`).textContent = 
-                        new Date(service.lastUpdated).toLocaleString();
+                // Update resource usage
+                updateResourceUsage('cpu', dashboardData.cpuUsage);
+                updateResourceUsage('memory', dashboardData.memoryUsage);
+                updateResourceUsage('storage', dashboardData.storageUsage);
+
+                // Update last refresh time
+                const lastUpdated = document.getElementById('lastUpdated');
+                if (lastUpdated) {
+                    lastUpdated.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+                }
+
+            } catch (error) {
+                console.error('Error updating dashboard:', error);
+            }
+        }
+
+        function updateMetricsCards(data) {
+            // Update the metrics cards
+            const updates = {
+                'activeOrdersCount': data.activeOrders || 0,
+                'inventoryCount': data.inventoryCount || 0,
+                'systemHealth': data.systemHealth || '-',
+                'responseTime': data.responseTime || '0ms'
+            };
+
+            for (const [id, value] of Object.entries(updates)) {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.textContent = value;
+                }
+            }
+        }
+
+        function updateServiceTable(services) {
+            if (!Array.isArray(services)) {
+                console.error('Services data is not an array:', services);
+                return;
+            }
+
+            services.forEach(service => {
+                // Convert service name to ID format
+                const serviceId = service.Name.replace(/\s+/g, '').toLowerCase();
+                const rowId = `${serviceId}Row`;
+                const row = document.getElementById(rowId);
+
+                if (!row) {
+                    console.warn(`Row not found for service: ${service.Name} (looking for ID: ${rowId})`);
+                    return;
+                }
+
+                // Update status badge
+                const statusBadge = row.querySelector('.badge');
+                if (statusBadge) {
+                    const statusClass = getStatusClass(service.Status);
+                    statusBadge.className = `badge ${statusClass}`;
+                    statusBadge.textContent = service.Status;
+                }
+
+                // Update uptime
+                const uptimeCell = row.querySelector('td:nth-child(3)');
+                if (uptimeCell) {
+                    uptimeCell.textContent = service.Uptime || '-';
+                }
+
+                // Update last updated time
+                const lastUpdateCell = row.querySelector('td:nth-child(4)');
+                if (lastUpdateCell) {
+                    lastUpdateCell.textContent = service.LastUpdated ?
+                        new Date(service.LastUpdated).toLocaleString() : '-';
                 }
             });
-
-            // Update system resources
-            updateResourceUsage('cpu', dashboardData.cpuUsage || 60);
-            updateResourceUsage('memory', dashboardData.memoryUsage || 45);
-            updateResourceUsage('storage', dashboardData.storageUsage || 30);
-
-            // Update last refresh time
-            document.getElementById('lastUpdated').textContent = 
-                `Last updated: ${new Date().toLocaleTimeString()}`;
         }
-    } catch (error) {
-        console.error('Error updating dashboard:', error);
-    }
-}
 
-function updateResourceUsage(type, value) {
-    const bar = document.getElementById(`${type}Usage`);
-    const text = document.getElementById(`${type}UsageText`);
-    if (bar && text) {
-        bar.style.width = `${value}%`;
-        text.textContent = `${value}%`;
-    }
-}
+        function getStatusClass(status) {
+            switch (status?.toLowerCase()) {
+                case 'healthy':
+                    return 'bg-success';
+                case 'unhealthy':
+                    return 'bg-danger';
+                case 'degraded':
+                    return 'bg-warning';
+                default:
+                    return 'bg-secondary';
+            }
+        }
 
-function refreshDashboard() {
-    updateDashboard();
-}
+        function updateResourceUsage(type, value) {
+            const bar = document.getElementById(`${type}Usage`);
+            const text = document.getElementById(`${type}UsageText`);
 
-// Initial update and start interval
-document.addEventListener('DOMContentLoaded', () => {
-    updateDashboard();
-    updateInterval = setInterval(updateDashboard, 5000);
-});
+            if (!bar || !text) {
+                console.warn(`Resource usage elements not found for type: ${type}`);
+                return;
+            }
 
-// Clean up interval when leaving the page
-window.addEventListener('beforeunload', () => {
-    clearInterval(updateInterval);
-});
-</script>
+            // Ensure value is a number and between 0-100
+            value = Math.min(Math.max(Number(value) || 0, 0), 100);
+
+            bar.style.width = `${value}%`;
+            text.textContent = `${value}%`;
+
+            // Update color based on usage
+            bar.className = `progress-bar ${getResourceUsageClass(value)}`;
+        }
+
+        function getResourceUsageClass(value) {
+            if (value > 80) return 'bg-danger';
+            if (value > 60) return 'bg-warning';
+            return 'bg-success';
+        }
+
+        // Initialize dashboard when DOM is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Initializing dashboard...');
+            updateDashboard();
+            updateInterval = setInterval(updateDashboard, 30000);
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (updateInterval) {
+                clearInterval(updateInterval);
+            }
+        });
+
+        // Add manual refresh handler
+        const refreshButton = document.querySelector('[data-refresh]');
+        if (refreshButton) {
+            refreshButton.addEventListener('click', updateDashboard);
+        }
+    </script>
 }
