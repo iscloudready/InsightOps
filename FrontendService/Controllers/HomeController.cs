@@ -30,6 +30,67 @@ public class HomeController : Controller
         {
             var client = _clientFactory.CreateClient("ApiGateway");
 
+            var ordersResponse = await client.GetAsync("/api/gateway/orders");
+            var inventoryResponse = await client.GetAsync("/api/gateway/inventory");
+            var healthResponse = await client.GetAsync("/health");
+
+            var orders = ordersResponse.IsSuccessStatusCode ?
+                await ordersResponse.Content.ReadFromJsonAsync<List<OrderDto>>() :
+                new List<OrderDto>();
+
+            var inventory = inventoryResponse.IsSuccessStatusCode ?
+                await inventoryResponse.Content.ReadFromJsonAsync<List<InventoryItemDto>>() :
+                new List<InventoryItemDto>();
+
+            // Mock data for demo purposes - replace with real metrics in production
+            var metrics = new Dictionary<string, double>
+            {
+                ["cpu_usage"] = Random.Shared.NextDouble() * 100,
+                ["memory_usage"] = Random.Shared.NextDouble() * 100,
+                ["storage_usage"] = Random.Shared.NextDouble() * 100
+            };
+
+            var data = new
+            {
+                activeOrders = orders?.Count ?? 0,
+                pendingOrders = orders?.Count(o => o.Status == "Pending") ?? 0,
+                completedOrders = orders?.Count(o => o.Status == "Completed") ?? 0,
+                totalOrderValue = orders?.Sum(o => o.TotalPrice) ?? 0,
+
+                inventoryCount = inventory?.Count ?? 0,
+                lowStockItems = inventory?.Count(i => i.Quantity <= i.MinimumQuantity) ?? 0,
+                totalInventoryValue = inventory?.Sum(i => i.Price * i.Quantity) ?? 0,
+                outOfStockItems = inventory?.Count(i => i.Quantity == 0) ?? 0,
+
+                systemHealth = ordersResponse.IsSuccessStatusCode &&
+                              inventoryResponse.IsSuccessStatusCode &&
+                              healthResponse.IsSuccessStatusCode ? "Healthy" : "Degraded",
+                responseTime = $"{Random.Shared.Next(50, 200)}ms",  // Mock data
+
+                cpuUsage = metrics["cpu_usage"],
+                memoryUsage = metrics["memory_usage"],
+                storageUsage = metrics["storage_usage"],
+
+                requestRate = Random.Shared.Next(100, 1000),
+                errorRate = Random.Shared.NextDouble() * 1
+            };
+
+            return Json(data);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching dashboard data");
+            return StatusCode(500, new { error = "Error fetching dashboard data" });
+        }
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> _GetDashboardData()
+    {
+        try
+        {
+            var client = _clientFactory.CreateClient("ApiGateway");
+
             // Parallel requests for performance
             var responses = await Task.WhenAll(
                 client.GetAsync("/api/gateway/orders"),
@@ -162,9 +223,64 @@ public class HomeController : Controller
         return Math.Clamp(uptimePercentage, 0, 100);
     }
 
-
     [HttpGet]
     public async Task<IActionResult> GetServiceStatus()
+    {
+        try
+        {
+            var client = _clientFactory.CreateClient("ApiGateway");
+            var services = new[]
+            {
+            ("Order Service", "/api/gateway/orders/health"),
+            ("Inventory Service", "/api/gateway/inventory/health"),
+            ("Frontend Service", "/health")
+        };
+
+            var statuses = new List<ServiceStatus>();
+            foreach (var (name, endpoint) in services)
+            {
+                try
+                {
+                    var response = await client.GetAsync(endpoint);
+                    var isHealthy = response.IsSuccessStatusCode;
+
+                    statuses.Add(new ServiceStatus
+                    {
+                        Name = name,
+                        Status = isHealthy ? "Healthy" : "Unhealthy",
+                        LastUpdated = DateTime.UtcNow,
+                        Uptime = "99.9%", // Mock data - implement real uptime tracking
+                        Metrics = new Dictionary<string, string>
+                        {
+                            ["Requests"] = $"{Random.Shared.Next(100, 1000)}/min",
+                            ["ErrorRate"] = $"{Random.Shared.NextDouble():P2}",
+                            ["AvgResponseTime"] = $"{Random.Shared.Next(50, 200)}ms"
+                        }
+                    });
+                }
+                catch
+                {
+                    statuses.Add(new ServiceStatus
+                    {
+                        Name = name,
+                        Status = "Unhealthy",
+                        LastUpdated = DateTime.UtcNow,
+                        Uptime = "0%"
+                    });
+                }
+            }
+
+            return Json(statuses);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching service status");
+            return StatusCode(500, new { error = "Error fetching service status" });
+        }
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> _GetServiceStatus()
     {
         try
         {
@@ -352,7 +468,12 @@ public class HomeController : Controller
         return "125ms";
     }
 
-    public async Task<IActionResult> Index()
+    public IActionResult Index()
+    {
+        return View();
+    }
+
+    public async Task<IActionResult> _Index()
     {
         var dashboardData = new DashboardViewModel();
 
@@ -390,7 +511,7 @@ public class HomeController : Controller
         return View(dashboardData);
     }
 
-    public async Task<IActionResult> _Index()
+    public async Task<IActionResult> __Index()
     {
         var dashboardData = new DashboardViewModel();
 
