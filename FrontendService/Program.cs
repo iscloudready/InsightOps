@@ -11,10 +11,12 @@ using System.Net.Http.Headers;
 using Polly;
 using Polly.Extensions.Http;
 using Polly.Timeout;
+using FrontendService.Services;
 using FrontendService.Services.Monitoring;
 using FrontendService.Extensions;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Serilog.Core;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -65,8 +67,58 @@ if (builder.Environment.IsDevelopment() || builder.Environment.EnvironmentName =
     });
 }
 
-// Add application services
-builder.Services.AddApplicationServices(builder.Configuration);
+// First register core services
+builder.Services.AddSingleton<MetricsCollector>();
+builder.Services.AddSingleton<SystemMetricsCollector>();
+
+// Register application services
+builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<IInventoryService, InventoryService>();
+
+// Configure HttpClient with proper policies
+builder.Services.AddHttpClient("ApiGateway", client =>
+{
+    var apiGatewayUrl = builder.Configuration["ServiceUrls:ApiGateway"] ?? "http://localhost:7237";
+    //_logger.LogInformation("Configuring API Gateway URL: {Url}", apiGatewayUrl);
+    client.BaseAddress = new Uri(apiGatewayUrl);
+    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+    client.Timeout = TimeSpan.FromSeconds(30);
+})
+.AddTransientHttpErrorPolicy(p =>
+    p.WaitAndRetryAsync(
+        retryCount: 5,
+        sleepDurationProvider: retryAttempt =>
+            TimeSpan.FromMilliseconds(100 * Math.Pow(2, retryAttempt)),
+        onRetry: (exception, timeSpan, retryCount, context) =>
+        {
+            Console.WriteLine($"Retry {retryCount} after {timeSpan.TotalMilliseconds}ms delay due to {exception.Exception?.Message}");
+        })
+)
+.AddTransientHttpErrorPolicy(p =>
+    p.CircuitBreakerAsync(
+        handledEventsAllowedBeforeBreaking: 10,
+        durationOfBreak: TimeSpan.FromSeconds(5),
+        onBreak: (exception, duration) =>
+        {
+            Console.WriteLine($"Circuit breaker opened for {duration.TotalSeconds}s due to {exception.Exception?.Message}");
+        },
+        onReset: () =>
+        {
+            Console.WriteLine("Circuit breaker reset");
+        })
+);
+
+// Configure health checks
+builder.Services.AddHealthChecks()
+    .AddUrlGroup(
+        new Uri($"{builder.Configuration["ServiceUrls:ApiGateway"]}/health"),
+        name: "api-gateway")
+    .AddUrlGroup(
+        new Uri($"{builder.Configuration["ServiceUrls:OrderService"]}/health"),
+        name: "orders-api")
+    .AddUrlGroup(
+        new Uri($"{builder.Configuration["ServiceUrls:InventoryService"]}/health"),
+        name: "inventory-api");
 
 // Configure monitoring endpoints
 var tempoEndpoint = builder.Environment.IsDevelopment()
@@ -154,8 +206,6 @@ app.UseSerilogRequestLogging(options =>
 
 // Configure middleware
 app.UseHttpsRedirection();
-app.UseStaticFiles();
-app.UseRouting();
 app.UseAuthorization();
 
 // Configure endpoints

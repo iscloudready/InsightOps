@@ -2,7 +2,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
-using static FrontendService.Services.Monitoring.MetricsCollector;
+//using static FrontendService.Services.Monitoring.MetricsCollector;
 
 namespace FrontendService.Services.Monitoring
 {
@@ -16,10 +16,14 @@ namespace FrontendService.Services.Monitoring
         private DateTime _lastCheck = DateTime.UtcNow;
         private double _lastCpuTotal = 0;
         private double _lastCpuIdle = 0;
+        private readonly MetricsCollector _metricsCollector;
 
-        public SystemMetricsCollector(ILogger<SystemMetricsCollector> logger)
+        public SystemMetricsCollector(
+            ILogger<SystemMetricsCollector> logger,
+            MetricsCollector metricsCollector)  // Add this parameter
         {
             _logger = logger;
+            _metricsCollector = metricsCollector;
             InitializeCounters();
         }
 

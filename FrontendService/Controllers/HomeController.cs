@@ -12,6 +12,7 @@ using FrontendService.Models.DTOs;
 using System.Net.Http.Json;
 using FrontendService.Services.Monitoring;
 using System.Text.Json;
+using Polly.CircuitBreaker;
 
 public class HomeController : Controller
 {
@@ -209,6 +210,33 @@ public class HomeController : Controller
                 _logger.LogError(ex, "Unexpected error fetching dashboard data: {Message}", ex.Message);
                 return StatusCode(500, new { error = "Internal server error", details = ex.Message });
             }
+        }
+        catch (BrokenCircuitException)
+        {
+            _logger.LogWarning("Circuit breaker is open, returning fallback data");
+
+            // Return basic data that doesn't require API calls
+            var systemMetrics = _metricsCollector.GetSystemMetrics();
+            return Json(new
+            {
+                activeOrders = 0,
+                inventoryCount = 0,
+                systemHealth = "Degraded",
+                responseTime = "0ms",
+                cpuUsage = systemMetrics.CpuUsage,
+                memoryUsage = systemMetrics.MemoryUsage,
+                storageUsage = systemMetrics.StorageUsage,
+                errorRate = 100,
+                apiStatus = new
+                {
+                    ordersEndpoint = "Circuit Open",
+                    inventoryEndpoint = "Circuit Open",
+                    healthy = false
+                },
+                orderTrends = GenerateOrderTrends(),
+                inventoryTrends = GenerateInventoryTrends(),
+                lastUpdated = DateTime.UtcNow
+            });
         }
         catch (Exception ex)
         {

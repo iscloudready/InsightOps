@@ -16,11 +16,17 @@ namespace FrontendService.Extensions
 {
     public static class ServiceCollectionExtensions
     {
-        private static readonly ILogger<Program> _logger;
+        //private static readonly ILogger<Program> _logger;
 
         public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
         {
-            // Register HTTP clients with resilience policies
+            // First register MetricsCollector
+            services.AddSingleton<MetricsCollector>();
+
+            // Then register SystemMetricsCollector which depends on it
+            services.AddSingleton<SystemMetricsCollector>();
+
+            // Rest of your service registrations...
             services.AddHttpClient("ApiGateway", client =>
             {
                 var apiGatewayUrl = configuration["ServiceUrls:ApiGateway"]
@@ -32,27 +38,15 @@ namespace FrontendService.Extensions
             .AddPolicyHandler(GetRetryPolicy())
             .AddPolicyHandler(GetCircuitBreakerPolicy());
 
-            // Register services
             services.AddMemoryCache();
-            services.AddSingleton<SystemMetricsCollector>();
-            services.AddSingleton<MetricsCollector>();
             services.AddScoped<IOrderService, OrderService>();
             services.AddScoped<IInventoryService, InventoryService>();
 
-            // Register health checks
+            // Health checks
             services.AddHealthChecks()
-                .AddUrlGroup(
-                    new Uri($"{configuration["ServiceUrls:ApiGateway"]}/health"),
-                    name: "api-gateway",
-                    tags: new[] { "gateway" })
-                .AddUrlGroup(
-                    new Uri($"{configuration["ServiceUrls:OrderService"]}/health"),
-                    name: "orders-api",
-                    tags: new[] { "orders" })
-                .AddUrlGroup(
-                    new Uri($"{configuration["ServiceUrls:InventoryService"]}/health"),
-                    name: "inventory-api",
-                    tags: new[] { "inventory" });
+                .AddUrlGroup(new Uri($"{configuration["ServiceUrls:ApiGateway"]}/health"), "api-gateway")
+                .AddUrlGroup(new Uri($"{configuration["ServiceUrls:OrderService"]}/health"), "orders-api")
+                .AddUrlGroup(new Uri($"{configuration["ServiceUrls:InventoryService"]}/health"), "inventory-api");
 
             return services;
         }
