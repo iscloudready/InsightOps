@@ -721,6 +721,56 @@ datasources:
     }
 }
 
+function Rebuild-DockerService {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$false)]
+        [string]$ServiceName
+    )
+    try {
+        # Ensure Docker is running
+        if (-not (docker info)) {
+            throw "Docker is not running"
+        }
+
+        Write-Host "CONFIG_PATH set to: $script:CONFIG_PATH" -ForegroundColor Green
+        $env:CONFIG_PATH = $script:CONFIG_PATH
+
+        # Stop the services first
+        if ([string]::IsNullOrWhiteSpace($ServiceName)) {
+            Write-Host "Stopping all services..." -ForegroundColor Yellow
+            docker-compose -f $script:DOCKER_COMPOSE_PATH down
+            
+            Write-Host "Cleaning up..." -ForegroundColor Yellow
+            docker system prune -f
+            
+            Write-Host "Rebuilding all services..." -ForegroundColor Yellow
+            docker-compose -f $script:DOCKER_COMPOSE_PATH build --no-cache
+            
+            Write-Host "Starting all services..." -ForegroundColor Yellow
+            docker-compose -f $script:DOCKER_COMPOSE_PATH up -d
+        } else {
+            Write-Host "Stopping service: $ServiceName..." -ForegroundColor Yellow
+            docker-compose -f $script:DOCKER_COMPOSE_PATH stop $ServiceName
+            docker-compose -f $script:DOCKER_COMPOSE_PATH rm -f $ServiceName
+            
+            Write-Host "Rebuilding service: $ServiceName..." -ForegroundColor Yellow
+            docker-compose -f $script:DOCKER_COMPOSE_PATH build --no-cache $ServiceName
+            
+            Write-Host "Starting service: $ServiceName..." -ForegroundColor Yellow
+            docker-compose -f $script:DOCKER_COMPOSE_PATH up -d $ServiceName
+        }
+
+        Write-Host "Checking service status..." -ForegroundColor Yellow
+        docker-compose -f $script:DOCKER_COMPOSE_PATH ps
+        
+        Write-Host "Rebuild completed successfully" -ForegroundColor Green
+    } catch {
+        Write-Error "Failed to rebuild service: $_"
+        Write-Host "Stack Trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+    }
+}
+
 # Export functions
 Export-ModuleMember -Function @(
     'Show-DockerStatus',
@@ -736,5 +786,6 @@ Export-ModuleMember -Function @(
     'Test-ServiceHealth',
     'Get-DetailedServiceLogs',     
     'Set-VolumePermissions',
-    'Initialize-GrafanaDashboards'
+    'Initialize-GrafanaDashboards',
+    'Rebuild-DockerService'
 )

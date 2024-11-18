@@ -308,8 +308,18 @@ function Invoke-MenuChoice {
                 Start-DockerServices 
             }
             "9" {
-                $service = Read-Host "Enter service name to rebuild"
-                Restart-DockerService -ServiceName $service
+                try {
+                    Write-Host "Enter service name to rebuild (leave empty to rebuild all): " -ForegroundColor Cyan -NoNewline
+                    $service = Read-Host
+
+                    if ([string]::IsNullOrWhiteSpace($service)) {
+                        Rebuild-DockerService
+                    } else {
+                        Rebuild-DockerService -ServiceName $service
+                    }
+                } catch {
+                    Write-Error "Error executing option 9: $_"
+                }
             }
 
             # Monitoring & Health
