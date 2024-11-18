@@ -30,6 +30,10 @@ builder.Services.AddLogging(loggingBuilder =>
         LogLevel.Debug : LogLevel.Information);
 });
 
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo("/keys"))
+    .DisableAutomaticKeyGeneration();
+
 // Configure Serilog based on environment
 var lokiUrl = builder.Environment.IsDevelopment()
     ? "http://localhost:3100"

@@ -264,7 +264,7 @@ services:
 
   orderservice:
     build:
-      context: ./OrderService
+      context: ../OrderService
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_orderservice
     environment:
@@ -273,7 +273,7 @@ services:
       - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
     volumes:
-      - ${CONFIG_PATH:-./Configurations}/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - ${PROJECT_ROOT:-..}/OrderService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
     ports:
       - "${ORDERSERVICE_PORT:-7265}:80"
     depends_on:
@@ -288,7 +288,7 @@ services:
 
   inventoryservice:
     build:
-      context: ./InventoryService
+      context: ../InventoryService
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_inventoryservice
     environment:
@@ -296,7 +296,7 @@ services:
       - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
     volumes:
-      - ${CONFIG_PATH:-./Configurations}/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - ${PROJECT_ROOT:-..}/InventoryService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
     ports:
       - "${INVENTORYSERVICE_PORT:-7070}:80"
     depends_on:
@@ -311,14 +311,14 @@ services:
 
   apigateway:
     build:
-      context: ./ApiGateway
+      context: ../ApiGateway
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_apigateway
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
     volumes:
-      - ${CONFIG_PATH:-./Configurations}/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - ${PROJECT_ROOT:-..}/ApiGateway/appsettings.Docker.json:/app/appsettings.Docker.json:ro
     ports:
       - "${APIGATEWAY_PORT:-7237}:80"
     depends_on:
@@ -335,14 +335,16 @@ services:
 
   frontend:
     build:
-      context: ./FrontendService
+      context: ../FrontendService
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_frontend
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
+      - DataProtection__Keys=/keys
     volumes:
-      - ${CONFIG_PATH:-./Configurations}/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - ${PROJECT_ROOT:-..}/FrontendService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - frontend_keys:/keys
     ports:
       - "${FRONTEND_PORT:-7144}:80"
     depends_on:
@@ -430,22 +432,18 @@ services:
 volumes:
   postgres_data:
     name: ${NAMESPACE:-insightops}_postgres_data
-    external: true
   grafana_data:
     name: ${NAMESPACE:-insightops}_grafana_data
-    external: true
   prometheus_data:
     name: ${NAMESPACE:-insightops}_prometheus_data
-    external: true
   loki_data:
     name: ${NAMESPACE:-insightops}_loki_data
-    external: true
   tempo_data:
     name: ${NAMESPACE:-insightops}_tempo_data
-    external: true
   loki_wal:
     name: ${NAMESPACE:-insightops}_loki_wal
-    external: true
+  frontend_keys:
+    name: ${NAMESPACE:-insightops}_frontend_keys
 
 networks:
   default:
