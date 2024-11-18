@@ -312,13 +312,22 @@ function Invoke-MenuChoice {
                     Write-Host "Enter service name to rebuild (leave empty to rebuild all): " -ForegroundColor Cyan -NoNewline
                     $service = Read-Host
 
+                    # First reset the environment
+                    Write-Host "`nResetting Docker environment..." -ForegroundColor Yellow
+                    if (-not (Reset-DockerEnvironment)) {
+                        throw "Failed to reset Docker environment"
+                    }
+
+                    # Then rebuild
+                    Write-Host "`nRebuilding services..." -ForegroundColor Yellow
                     if ([string]::IsNullOrWhiteSpace($service)) {
                         Rebuild-DockerService
                     } else {
                         Rebuild-DockerService -ServiceName $service
                     }
-                } catch {
-                    Write-Error "Error executing option 9: $_"
+                }
+                catch {
+                    Write-Error "Error executing rebuild operation: $_"
                 }
             }
 

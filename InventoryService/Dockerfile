@@ -1,40 +1,35 @@
-﻿# InventoryService Dockerfile
-# Base stage for running the application
+﻿# Base stage
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
-ARG BUILD_CONFIGURATION=Release
 USER root
 WORKDIR /app
 EXPOSE 80
 EXPOSE 7070
 
-# Install curl and wget for resource fetching and health checks
+# Install required tools
 RUN apt-get update \
     && apt-get install -y wget curl \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# Switch to a non-root user after installing necessary packages for security
-RUN useradd -m -u 1001 -g 1001 appuser && chown -R appuser /app
-USER appuser
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -g 1001 appgroup \
+    && useradd -u 1001 -g appgroup -s /bin/bash -m appuser \
+    && chown -R appuser:appgroup /app
 
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["InventoryService.csproj", "."]
-RUN dotnet restore "./InventoryService.csproj"
+RUN dotnet restore "InventoryService.csproj"
 COPY . .
-WORKDIR "/src/."
-RUN dotnet build "./InventoryService.csproj" -c $BUILD_CONFIGURATION -o /app/build
+RUN dotnet build "InventoryService.csproj" -c Release -o /app/build
 
 # Publish stage
 FROM build AS publish
-ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./InventoryService.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "InventoryService.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
-# Final stage for running the application
+# Final stage
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+USER appuser
 ENV ASPNETCORE_ENVIRONMENT=Docker
 ENTRYPOINT ["dotnet", "InventoryService.dll"]

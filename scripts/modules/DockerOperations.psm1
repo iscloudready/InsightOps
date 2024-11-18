@@ -1,8 +1,69 @@
-# DockerOperations.psm1
+﻿# DockerOperations.psm1
 # Purpose: Docker operations management
 $script:CONFIG_PATH = (Get-Variable -Name CONFIG_PATH -Scope Global).Value
 $script:DOCKER_COMPOSE_PATH = Join-Path $script:CONFIG_PATH "docker-compose.yml"
 $script:ENV_FILE = Join-Path $script:CONFIG_PATH ".env.Development"
+
+# Add to your script initialization
+$env:DOCKER_BUILDKIT = 1
+$env:COMPOSE_DOCKER_CLI_BUILD = 1
+
+# Function to verify Docker environment
+function Test-DockerEnvironment {
+    [CmdletBinding()]
+    param()
+    
+    try {
+        # Check Docker daemon
+        $dockerInfo = docker info 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Docker daemon is not running"
+            return $false
+        }
+
+        # Check Docker Compose
+        $composeVersion = docker-compose version 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Docker Compose is not available"
+            return $false
+        }
+
+        # Check BuildKit
+        if (-not $env:DOCKER_BUILDKIT) {
+            $env:DOCKER_BUILDKIT = 1
+            Write-Host "Enabled BuildKit" -ForegroundColor Yellow
+        }
+
+        return $true
+    }
+    catch {
+        Write-Error "Error checking Docker environment: $_"
+        return $false
+    }
+}
+
+function Reset-DockerEnvironment {
+    [CmdletBinding()]
+    param()
+    
+    try {
+        $dockerComposePath = Join-Path $script:CONFIG_PATH "docker-compose.yml"
+        Write-Host "Using docker-compose at: $dockerComposePath" -ForegroundColor Cyan
+        
+        Write-Host "Stopping all containers..." -ForegroundColor Yellow
+        docker-compose -f $dockerComposePath down
+        Write-Host "Removing all containers..." -ForegroundColor Yellow
+        docker rm -f $(docker ps -aq) 2>$null
+        Write-Host "Cleaning up system..." -ForegroundColor Yellow
+        docker system prune -f
+        Write-Host "Docker environment reset complete" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Error "Error resetting Docker environment: $_"
+        return $false
+    }
+}
 
 function Initialize-DockerEnvironment {
     [CmdletBinding()]
@@ -247,7 +308,36 @@ function Test-ServiceHealth {
     }
 }
 
-function Start-DockerServices { 
+function Start-DockerServices {
+    [CmdletBinding()]
+    param()
+    
+    try {
+        if (-not (Test-DockerEnvironment)) {
+            throw "Docker environment check failed"
+        }
+
+        Write-Host "Starting Docker services..." -ForegroundColor Cyan
+        $env:CONFIG_PATH = $script:CONFIG_PATH
+        
+        # Pull latest images
+        docker-compose -f $script:DOCKER_COMPOSE_PATH pull
+
+        # Build and start services
+        docker-compose -f $script:DOCKER_COMPOSE_PATH up -d --build --remove-orphans
+
+        Write-Host "Services started successfully" -ForegroundColor Green
+        docker-compose -f $script:DOCKER_COMPOSE_PATH ps
+        
+        return $true
+    }
+    catch {
+        Write-Error "Failed to start services: $_"
+        return $false
+    }
+}
+
+function _Start-DockerServices { 
     [CmdletBinding()]
     param()
     
@@ -723,52 +813,210 @@ datasources:
 
 function Rebuild-DockerService {
     [CmdletBinding()]
-    param (
+    param([string]$ServiceName)
+    try {
+        $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        Write-Host "Project Root: $projectRoot" -ForegroundColor Cyan
+        
+        # Set config path
+        $configPath = Join-Path $projectRoot "Configurations"
+        $dockerComposePath = Join-Path $configPath "docker-compose.yml"
+        
+        # Generate and save docker-compose.yml
+        $dockerComposeContent = Get-DockerComposeConfig
+        Set-Content -Path $dockerComposePath -Value $dockerComposeContent -Force
+        Write-Host "Updated docker-compose.yml at: $dockerComposePath" -ForegroundColor Green
+
+                # Stop services
+        Write-Host "Stopping services..." -ForegroundColor Yellow
+        docker-compose -f $dockerComposePath down --remove-orphans
+
+        # Clean up
+        Write-Host "Cleaning up..." -ForegroundColor Yellow
+        docker system prune -f --volumes
+
+        # Rebuild services
+        Write-Host "Rebuilding services..." -ForegroundColor Yellow
+        if ([string]::IsNullOrWhiteSpace($ServiceName)) {
+            docker-compose -f $dockerComposePath build --no-cache
+            Write-Host "Starting all services..." -ForegroundColor Yellow
+            docker-compose -f $dockerComposePath up -d
+        } else {
+            docker-compose -f $dockerComposePath build --no-cache $ServiceName
+            Write-Host "Starting service: $ServiceName..." -ForegroundColor Yellow
+            docker-compose -f $dockerComposePath up -d $ServiceName
+        }
+
+        # Verify services
+        Write-Host "Verifying services..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 10
+        docker-compose -f $dockerComposePath ps
+
+        return $true
+    }
+    catch {
+        Write-Error "Failed to rebuild service: $_"
+        Write-Host "Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+        return $false
+    }
+}
+
+
+function _Rebuild-DockerService {
+    [CmdletBinding()]
+    param(
         [Parameter(Mandatory=$false)]
         [string]$ServiceName
     )
     try {
-        # Ensure Docker is running
-        if (-not (docker info)) {
-            throw "Docker is not running"
+        # Get project root directory
+        $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        Write-Host "Project Root: $projectRoot" -ForegroundColor Cyan
+
+        # Verify directory structure
+        if (-not (Test-DirectoryStructure -BaseDirectory $projectRoot)) {
+            throw "Invalid directory structure. Please check required directories."
         }
 
-        Write-Host "CONFIG_PATH set to: $script:CONFIG_PATH" -ForegroundColor Green
-        $env:CONFIG_PATH = $script:CONFIG_PATH
+        # Set environment variables
+        $env:CONFIG_PATH = Join-Path $projectRoot "Configurations"
+        $env:DOCKER_BUILDKIT = 1
+        $env:COMPOSE_DOCKER_CLI_BUILD = 1
 
-        # Stop the services first
-        if ([string]::IsNullOrWhiteSpace($ServiceName)) {
-            Write-Host "Stopping all services..." -ForegroundColor Yellow
-            docker-compose -f $script:DOCKER_COMPOSE_PATH down
-            
-            Write-Host "Cleaning up..." -ForegroundColor Yellow
-            docker system prune -f
-            
-            Write-Host "Rebuilding all services..." -ForegroundColor Yellow
-            docker-compose -f $script:DOCKER_COMPOSE_PATH build --no-cache
-            
-            Write-Host "Starting all services..." -ForegroundColor Yellow
-            docker-compose -f $script:DOCKER_COMPOSE_PATH up -d
-        } else {
-            Write-Host "Stopping service: $ServiceName..." -ForegroundColor Yellow
-            docker-compose -f $script:DOCKER_COMPOSE_PATH stop $ServiceName
-            docker-compose -f $script:DOCKER_COMPOSE_PATH rm -f $ServiceName
-            
-            Write-Host "Rebuilding service: $ServiceName..." -ForegroundColor Yellow
-            docker-compose -f $script:DOCKER_COMPOSE_PATH build --no-cache $ServiceName
-            
-            Write-Host "Starting service: $ServiceName..." -ForegroundColor Yellow
-            docker-compose -f $script:DOCKER_COMPOSE_PATH up -d $ServiceName
-        }
+        Write-Host "Environment Variables:" -ForegroundColor Yellow
+        Write-Host "CONFIG_PATH: $($env:CONFIG_PATH)" -ForegroundColor Yellow
+        Write-Host "DOCKER_BUILDKIT: $($env:DOCKER_BUILDKIT)" -ForegroundColor Yellow
 
-        Write-Host "Checking service status..." -ForegroundColor Yellow
-        docker-compose -f $script:DOCKER_COMPOSE_PATH ps
+        # Update docker-compose.yml paths
+        $dockerComposeContent = Get-DockerComposeConfig
+        $dockerComposePath = Join-Path $projectRoot "docker-compose.yml"
         
-        Write-Host "Rebuild completed successfully" -ForegroundColor Green
-    } catch {
-        Write-Error "Failed to rebuild service: $_"
-        Write-Host "Stack Trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+        # Update context paths in docker-compose
+        #$dockerComposeContent = $dockerComposeContent -replace 
+        #    './Frontend', './FrontendService'
+
+        Set-Content -Path $dockerComposePath -Value $dockerComposeContent -Force
+        Write-Host "Updated docker-compose.yml at: $dockerComposePath" -ForegroundColor Green
+
+        # Stop services
+        Write-Host "Stopping services..." -ForegroundColor Yellow
+        docker-compose -f $dockerComposePath down --remove-orphans
+
+        # Clean up
+        Write-Host "Cleaning up..." -ForegroundColor Yellow
+        docker system prune -f --volumes
+
+        # Rebuild services
+        Write-Host "Rebuilding services..." -ForegroundColor Yellow
+        if ([string]::IsNullOrWhiteSpace($ServiceName)) {
+            docker-compose -f $dockerComposePath build --no-cache
+            Write-Host "Starting all services..." -ForegroundColor Yellow
+            docker-compose -f $dockerComposePath up -d
+        } else {
+            docker-compose -f $dockerComposePath build --no-cache $ServiceName
+            Write-Host "Starting service: $ServiceName..." -ForegroundColor Yellow
+            docker-compose -f $dockerComposePath up -d $ServiceName
+        }
+
+        # Verify services
+        Write-Host "Verifying services..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 10
+        docker-compose -f $dockerComposePath ps
+
+        return $true
     }
+    catch {
+        Write-Error "Failed to rebuild service: $_"
+        Write-Host "Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+        return $false
+    }
+}
+
+function Test-DirectoryStructure {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$BaseDirectory
+    )
+
+    Write-Host "Checking directory structure in: $BaseDirectory" -ForegroundColor Cyan
+
+    # Expected directory structure
+    $requiredDirs = @{
+        "FrontendService" = "Frontend application"
+        "ApiGateway" = "API Gateway service"
+        "OrderService" = "Order management service"
+        "InventoryService" = "Inventory management service"
+        "Configurations" = "Configuration files"
+    }
+
+    $allExist = $true
+    foreach ($dir in $requiredDirs.Keys) {
+        $path = Join-Path $BaseDirectory $dir
+        if (Test-Path $path) {
+            Write-Host "✓ Found $($requiredDirs[$dir]) at: $dir" -ForegroundColor Green
+        } else {
+            Write-Host "✗ Missing $($requiredDirs[$dir]): $dir" -ForegroundColor Red
+            $allExist = $false
+        }
+    }
+
+    return $allExist
+}
+
+function Test-PreRebuildRequirements {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ProjectRoot
+    )
+    
+    $checks = @(
+        @{
+            Name = "Docker Engine"
+            Test = { docker info }
+        },
+        @{
+            Name = "Required Directories"
+            Test = { Test-DirectoryStructure -BaseDirectory $ProjectRoot }
+        },
+        @{
+            Name = "Configuration Files"
+            Test = { 
+                $configPath = Join-Path $ProjectRoot "Configurations"
+                Test-Path (Join-Path $configPath "appsettings.Docker.json") 
+            }
+        },
+        @{
+            Name = "Docker Network"
+            Test = { 
+                $network = docker network ls --filter name=insightops -q
+                if (-not $network) {
+                    docker network create insightops
+                }
+                $true
+            }
+        }
+    )
+
+    $allPassed = $true
+    foreach ($check in $checks) {
+        Write-Host "Checking $($check.Name)..." -ForegroundColor Yellow
+        try {
+            if (& $check.Test) {
+                Write-Host "✓ $($check.Name) check passed" -ForegroundColor Green
+            } else {
+                Write-Host "✗ $($check.Name) check failed" -ForegroundColor Red
+                $allPassed = $false
+            }
+        }
+        catch {
+            Write-Host "✗ $($check.Name) check failed: $_" -ForegroundColor Red
+            $allPassed = $false
+        }
+    }
+
+    return $allPassed
 }
 
 # Export functions
@@ -787,5 +1035,9 @@ Export-ModuleMember -Function @(
     'Get-DetailedServiceLogs',     
     'Set-VolumePermissions',
     'Initialize-GrafanaDashboards',
-    'Rebuild-DockerService'
+    'Rebuild-DockerService',
+    'Test-DockerEnvironment',
+    'Reset-DockerEnvironment',
+    'Test-PreRebuildRequirements',
+    'Test-DirectoryStructure'
 )

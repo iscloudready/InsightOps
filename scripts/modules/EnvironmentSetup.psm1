@@ -272,6 +272,8 @@ services:
       - ASPNETCORE_HTTP_PORTS=80
       - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+    volumes:
+      - ${CONFIG_PATH:-./Configurations}/appsettings.Docker.json:/app/appsettings.Docker.json:ro
     ports:
       - "${ORDERSERVICE_PORT:-7265}:80"
     depends_on:
@@ -293,6 +295,8 @@ services:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+    volumes:
+      - ${CONFIG_PATH:-./Configurations}/appsettings.Docker.json:/app/appsettings.Docker.json:ro
     ports:
       - "${INVENTORYSERVICE_PORT:-7070}:80"
     depends_on:
@@ -313,11 +317,15 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
+    volumes:
+      - ${CONFIG_PATH:-./Configurations}/appsettings.Docker.json:/app/appsettings.Docker.json:ro
     ports:
       - "${APIGATEWAY_PORT:-7237}:80"
     depends_on:
-      - orderservice
-      - inventoryservice
+      orderservice:
+        condition: service_healthy
+      inventoryservice:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s
@@ -327,16 +335,19 @@ services:
 
   frontend:
     build:
-      context: ./Frontend
+      context: ./FrontendService
       dockerfile: Dockerfile
     container_name: ${NAMESPACE:-insightops}_frontend
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
+    volumes:
+      - ${CONFIG_PATH:-./Configurations}/appsettings.Docker.json:/app/appsettings.Docker.json:ro
     ports:
       - "${FRONTEND_PORT:-7144}:80"
     depends_on:
-      - apigateway
+      apigateway:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s
