@@ -4,9 +4,6 @@ using FrontendService.Models.DTOs;
 using FrontendService.Models.Requests;
 using FrontendService.Models.Responses;
 
-// Add to both IInventoryService.cs and InventoryService.cs
-using FrontendService.Models.DTOs;
-
 // FrontendService/Services/IOrderService.cs
 namespace FrontendService.Services
 {

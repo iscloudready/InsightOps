@@ -44,19 +44,21 @@ builder.Services.AddDataProtection()
 
 // Configure Serilog based on environment
 var lokiUrl = builder.Environment.IsDevelopment()
-    ? "http://localhost:3100"
-    : "http://loki:3100";
+    ? "http://localhost:3101"
+    : "http://loki:3101";
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .Enrich.FromLogContext()
-    .Enrich.WithEnvironmentName()
-    .Enrich.WithThreadId()
+    .Enrich.WithProperty("service", "Frontend")
+    .Enrich.WithProperty("environment", builder.Environment.EnvironmentName)
+    .Enrich.WithProperty("traceId", Activity.Current?.Id ?? "")
     .WriteTo.Console(
-        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} {Properties}{NewLine}{Exception}")
     .WriteTo.Http(
         requestUri: $"{lokiUrl}/loki/api/v1/push",
+        restrictedToMinimumLevel: LogEventLevel.Information,
         queueLimitBytes: null)
     .CreateLogger();
 
@@ -184,6 +186,9 @@ app.UseHealthChecks("/health", new HealthCheckOptions
 {
     ResponseWriter = async (context, report) =>
     {
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        logger.LogInformation("Health check status: {Status}", report.Status);
+
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsJsonAsync(new
         {
