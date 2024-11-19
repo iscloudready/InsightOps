@@ -1,0 +1,75 @@
+﻿@model IEnumerable<OrderDto>
+@using FrontendService.Models.DTOs
+
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Orders Management</h1>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createOrderModal">
+            <i class="fas fa-plus"></i> New Order
+        </button>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <i class="fas fa-table me-1"></i>
+            Orders List
+        </div>
+        <div class="card-body">
+            <table id="ordersTable" class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Order ID</th>
+                        <th>Item</th>
+                        <th>Quantity</th>
+                        <th>Total Price</th>
+                        <th>Status</th>
+                        <th>Order Date</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var order in Model)
+                    {
+                        <tr>
+                            <td>@order.Id</td>
+                            <td>@order.ItemName</td>
+                            <td>@order.Quantity</td>
+                            <td>@order.TotalPrice.ToString("C")</td>
+                            <td>
+                                <span class="badge @(order.Status == "Completed" ? "bg-success" :
+                                                   order.Status == "Pending" ? "bg-warning" : "bg-secondary")">
+                                    @order.Status
+                                </span>
+                            </td>
+                            <td>@order.OrderDate.ToString("g")</td>
+                            <td>
+                                <button class="btn btn-sm btn-info" onclick="viewOrder(@order.Id)">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Create Order Modal -->
+<partial name="_CreateOrderModal" />
+
+@section Scripts {
+    <script>
+        $(document).ready(function () {
+            $('#ordersTable').DataTable({
+                order: [[5, 'desc']], // Sort by date descending
+                pageLength: 25
+            });
+        });
+
+        function viewOrder(orderId) {
+            // Implement order details view
+            alert('Order details for ID: ' + orderId);
+        }
+    </script>
+}

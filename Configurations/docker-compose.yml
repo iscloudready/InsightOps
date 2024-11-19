@@ -116,7 +116,7 @@ services:
       - ${PROJECT_ROOT:-..}/FrontendService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
       - frontend_keys:/keys
     ports:
-      - "${FRONTEND_PORT:-7144}:80"
+      - "${FRONTEND_PORT:-5010}:80"
     depends_on:
       apigateway:
         condition: service_healthy

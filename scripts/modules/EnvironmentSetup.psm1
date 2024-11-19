@@ -341,13 +341,13 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
-      - DataProtection__Keys=/app/keys
+      - DataProtection__Keys=/app/Keys
     user: "1001:1001" 
     volumes:
       - ${PROJECT_ROOT:-..}/FrontendService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
       - keys_data:/app/Keys
     ports:
-      - "${FRONTEND_PORT:-7144}:80"
+      - "${FRONTEND_PORT:-5010}:80"
     depends_on:
       apigateway:
         condition: service_healthy
@@ -450,7 +450,7 @@ volumes:
     driver: local
     driver_opts:
       type: none
-      device: ${CONFIG_PATH}/keys
+      device: ${CONFIG_PATH}/Keys
       o: bind
 
 networks:

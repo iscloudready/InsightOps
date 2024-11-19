@@ -10,6 +10,8 @@ using System.Reflection;
 using System.Text.Json;
 using InventoryService.Services;
 using InventoryService.Interfaces;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -56,7 +58,8 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddControllers();
 
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks()
+    .AddCheck("self", () => HealthCheckResult.Healthy());
 
 // Configure Swagger
 builder.Services.AddEndpointsApiExplorer();
@@ -91,6 +94,25 @@ builder.Services.AddOpenTelemetry()
 
 // Build and configure the app
 var app = builder.Build();
+
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        var response = new
+        {
+            status = report.Status.ToString(),
+            checks = report.Entries.Select(x => new
+            {
+                name = x.Key,
+                status = x.Value.Status.ToString(),
+                description = x.Value.Description
+            })
+        };
+        await JsonSerializer.SerializeAsync(context.Response.Body, response);
+    }
+});
 
 // Enhanced database initialization with migrations and seeding
 using (var scope = app.Services.CreateScope())

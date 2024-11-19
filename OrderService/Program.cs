@@ -10,6 +10,8 @@ using System.Reflection;
 using System.Text.Json;
 using OrderService.Interfaces;
 using OrderService.Services;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,6 +34,9 @@ builder.Configuration
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
     .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
     .AddEnvironmentVariables();
+
+builder.Services.AddHealthChecks()
+    .AddCheck("self", () => HealthCheckResult.Healthy());
 
 // Configure PostgreSQL Database connection with retry policy
 builder.Services.AddDbContext<OrderDbContext>(options =>
@@ -90,6 +95,25 @@ builder.Services.AddOpenTelemetry()
 
 // Build and configure the app
 var app = builder.Build();
+
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        var response = new
+        {
+            status = report.Status.ToString(),
+            checks = report.Entries.Select(x => new
+            {
+                name = x.Key,
+                status = x.Value.Status.ToString(),
+                description = x.Value.Description
+            })
+        };
+        await JsonSerializer.SerializeAsync(context.Response.Body, response);
+    }
+});
 
 // Enhanced database initialization with migrations and seeding
 using (var scope = app.Services.CreateScope())

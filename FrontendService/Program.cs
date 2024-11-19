@@ -18,6 +18,9 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Serilog.Core;
 using System.IO;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using System.Diagnostics;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -66,6 +69,10 @@ builder.Services.AddControllersWithViews()
         options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
         options.JsonSerializerOptions.PropertyNamingPolicy = null;
     });
+
+// Register services
+builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<IInventoryService, InventoryService>();
 
 // Configure services and logging based on environment
 if (builder.Environment.IsDevelopment() || builder.Environment.EnvironmentName == "Docker")
@@ -166,42 +173,84 @@ builder.Services.AddOpenTelemetry()
 // Configure Kestrel
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenAnyIP(5010);
+    options.ListenAnyIP(80);
+    // options.ListenAnyIP(5010);
 });
 
 var app = builder.Build();
 
+// Program.cs
+app.UseHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(new
+        {
+            status = report.Status.ToString(),
+            checks = report.Entries.Select(e => new
+            {
+                name = e.Key,
+                status = e.Value.Status.ToString(),
+                description = e.Value.Description
+            })
+        });
+    }
+});
+
 // Configure error handling with detailed messages
 if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
 {
+    // app.UseMiddleware<RouteDebugMiddleware>();
     app.UseDeveloperExceptionPage();
     app.UseExceptionHandler(errorApp =>
     {
         errorApp.Run(async context =>
         {
             var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
-            context.Response.StatusCode = 500;
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             context.Response.ContentType = "application/json";
 
             var exception = context.Features.Get<IExceptionHandlerFeature>();
             if (exception != null)
             {
                 logger.LogError(exception.Error, "An unhandled exception occurred");
-                await context.Response.WriteAsJsonAsync(new
+
+                var response = new
                 {
-                    error = "An error occurred.",
-                    detail = exception.Error.Message,
-                    stackTrace = exception.Error.StackTrace,
-                    path = context.Request.Path,
-                    timestamp = DateTime.UtcNow
-                });
+                    StatusCode = context.Response.StatusCode,
+                    Error = "An error occurred.",
+                    Detail = exception.Error.Message,
+                    StackTrace = app.Environment.IsDevelopment() ? exception.Error.StackTrace : null,
+                    Path = context.Request.Path,
+                    Timestamp = DateTime.UtcNow,
+                    Environment = app.Environment.EnvironmentName,
+                    RequestId = Activity.Current?.Id ?? context.TraceIdentifier
+                };
+
+                await context.Response.WriteAsJsonAsync(response);
             }
         });
     });
 }
 else
 {
-    app.UseExceptionHandler("/Home/Error");
+    // Production error handling
+    app.UseExceptionHandler(errorApp =>
+    {
+        errorApp.Run(async context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            context.Response.ContentType = "application/json";
+
+            await context.Response.WriteAsJsonAsync(new
+            {
+                StatusCode = context.Response.StatusCode,
+                Message = "An unexpected error occurred. Please try again later.",
+                RequestId = Activity.Current?.Id ?? context.TraceIdentifier
+            });
+        });
+    });
 }
 
 app.UseStaticFiles();
@@ -219,12 +268,56 @@ app.UseAuthorization();
 // Configure endpoints
 app.UseEndpoints(endpoints =>
 {
+    // Default route
     endpoints.MapControllerRoute(
         name: "default",
         pattern: "{controller=Home}/{action=Index}/{id?}");
 
-    endpoints.MapHealthChecks("/health");
+    // Specific routes for Orders and Inventory
+    endpoints.MapControllerRoute(
+        name: "orders",
+        pattern: "Home/Orders",
+        defaults: new { controller = "Orders", action = "Index" });
+
+    endpoints.MapControllerRoute(
+        name: "inventory",
+        pattern: "Home/Inventory",
+        defaults: new { controller = "Inventory", action = "Index" });
+
+    endpoints.MapControllerRoute(
+        name: "docker",
+        pattern: "docker/{action=Index}/{id?}",
+        defaults: new { controller = "DockerManagement" });
+
+    // Health check and metrics endpoints
+    endpoints.MapHealthChecks("/health", new HealthCheckOptions
+    {
+        ResponseWriter = async (context, report) =>
+        {
+            context.Response.ContentType = "application/json";
+            var response = new
+            {
+                status = report.Status.ToString(),
+                checks = report.Entries.Select(x => new
+                {
+                    name = x.Key,
+                    status = x.Value.Status.ToString(),
+                    description = x.Value.Description
+                })
+            };
+            await JsonSerializer.SerializeAsync(context.Response.Body, response);
+        }
+    });
+
     endpoints.MapPrometheusScrapingEndpoint("/metrics");
+});
+
+// Add CORS if needed
+app.UseCors(builder =>
+{
+    builder.AllowAnyOrigin()
+           .AllowAnyMethod()
+           .AllowAnyHeader();
 });
 
 // Add custom middleware for request logging

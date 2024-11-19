@@ -40,6 +40,12 @@ namespace FrontendService.Controllers
                 var output = await process.StandardOutput.ReadToEndAsync();
                 await process.WaitForExitAsync();
 
+                // Check if process exited successfully
+                if (process.ExitCode != 0)
+                {
+                    throw new Exception($"Docker command failed with exit code: {process.ExitCode}");
+                }
+
                 var containers = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                     .Select(json => JsonSerializer.Deserialize<ContainerInfo>(json))
                     .Where(c => c != null)
@@ -71,7 +77,7 @@ namespace FrontendService.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error fetching Docker information");
-                model.Error = "Failed to fetch Docker information: " + ex.Message;
+                model.Error = $"Failed to execute docker command: {ex.Message}. Please ensure Docker is installed and running.";
             }
 
             return View(model);

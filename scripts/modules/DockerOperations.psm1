@@ -795,29 +795,123 @@ datasources:
 }
 
 function Rebuild-DockerService {
+    [CmdletBinding()]
     param (
         [string]$ServiceName = $null
     )
+    
+    try {
+        # Verify Docker Compose file
+        if (-not (Test-Path $script:DOCKER_COMPOSE_PATH)) {
+            throw "Docker Compose configuration not found at: $script:DOCKER_COMPOSE_PATH"
+        }
 
-    Test-PathOrFail -Path $script:DOCKER_COMPOSE_PATH -Message "Docker Compose configuration not found"
+        # Setup environment variables
+        $env:NAMESPACE = if ([string]::IsNullOrEmpty($env:NAMESPACE)) { "insightops" } else { $env:NAMESPACE }
+        
+        # Create keys directory with proper permissions
+        $keysPath = Join-Path $env:CONFIG_PATH "keys"
+        if (-not (Test-Path $keysPath)) {
+            Write-Host "Creating keys directory: $keysPath" -ForegroundColor Yellow
+            New-Item -ItemType Directory -Path $keysPath -Force | Out-Null
+            Write-Host "✓ Created keys directory" -ForegroundColor Green
+        }
 
-    # Create keys directory with proper permissions
-    $keysPath = Join-Path $env:CONFIG_PATH "keys"
-    if (-not (Test-Path $keysPath)) {
-        New-Item -ItemType Directory -Path $keysPath -Force
+        # Setup volumes
+        Write-Host "Setting up Docker volumes..." -ForegroundColor Cyan
+        if (-not (Setup-DockerVolumes)) {
+            throw "Failed to setup Docker volumes"
+        }
+
+        # Stop any existing containers
+        Write-Host "Stopping existing containers..." -ForegroundColor Yellow
+        if ($ServiceName) {
+            docker-compose -f $script:DOCKER_COMPOSE_PATH stop $ServiceName
+        } else {
+            docker-compose -f $script:DOCKER_COMPOSE_PATH down
+        }
+
+        # Build and start services
+        Write-Host "Building and starting services..." -ForegroundColor Cyan
+        if ($ServiceName) {
+            Write-Host "Rebuilding service: $ServiceName" -ForegroundColor Yellow
+            $buildResult = docker-compose -f $script:DOCKER_COMPOSE_PATH build $ServiceName
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to build service $ServiceName : $buildResult"
+            }
+            
+            $upResult = docker-compose -f $script:DOCKER_COMPOSE_PATH up -d $ServiceName
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to start service $ServiceName : $upResult"
+            }
+        } else {
+            Write-Host "Rebuilding all services" -ForegroundColor Yellow
+            $buildResult = docker-compose -f $script:DOCKER_COMPOSE_PATH build
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to build services: $buildResult"
+            }
+            
+            $upResult = docker-compose -f $script:DOCKER_COMPOSE_PATH up -d
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to start services: $upResult"
+            }
+        }
+
+        # Wait for services to start
+        Write-Host "Waiting for services to initialize..." -ForegroundColor Cyan
+        Start-Sleep -Seconds 10
+
+        # Check service health
+        Write-Host "Checking service health..." -ForegroundColor Cyan
+        $services = if ($ServiceName) { @($ServiceName) } else { @("frontend", "apigateway", "orderservice", "inventoryservice") }
+        
+        foreach ($svc in $services) {
+            $containerName = "${env:NAMESPACE}_$svc"
+            $logs = docker logs $containerName 2>&1
+            $status = docker inspect --format='{{.State.Health.Status}}' $containerName 2>$null
+            
+            Write-Host "`nService: $svc" -ForegroundColor Cyan
+            Write-Host "Status: $status" -ForegroundColor $(if ($status -eq 'healthy') { 'Green' } else { 'Yellow' })
+            if ($status -ne 'healthy') {
+                Write-Host "Recent logs:" -ForegroundColor Yellow
+                $logs | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+            }
+        }
+
+        Write-Host "`nService rebuild completed" -ForegroundColor Green
+        return $true
     }
+    catch {
+        Write-Error "Failed to rebuild services: $_"
+        Write-Error $_.ScriptStackTrace
+        return $false
+    }
+}
 
-    # Setup volumes
-    Setup-DockerVolumes
+function Test-ServiceDependencies {
+    [CmdletBinding()]
+    param()
+    
+    try {
+        # Check PostgreSQL
+        $dbHealth = docker exec insightops_db pg_isready
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Database is not ready"
+            return $false
+        }
 
-    if ($ServiceName) {
-        Write-Host "Rebuilding service: $ServiceName"
-        docker-compose -f $script:DOCKER_COMPOSE_PATH build $ServiceName
-        docker-compose -f $script:DOCKER_COMPOSE_PATH up -d $ServiceName
-    } else {
-        Write-Host "Rebuilding all services"
-        docker-compose -f $script:DOCKER_COMPOSE_PATH build
-        docker-compose -f $script:DOCKER_COMPOSE_PATH up -d
+        # Check API Gateway
+        $gatewayHealth = Invoke-WebRequest "http://localhost:7237/health" -UseBasicParsing
+        if ($gatewayHealth.StatusCode -ne 200) {
+            Write-Warning "API Gateway is not healthy"
+            return $false
+        }
+
+        return $true
+    }
+    catch {
+        Write-Error "Failed to check service dependencies: $_"
+        return $false
     }
 }
 
@@ -963,6 +1057,9 @@ function Setup-DockerVolumes {
     [CmdletBinding()]
     param()
     
+    # Define consistent namespace
+    $namespace = if ([string]::IsNullOrEmpty($env:NAMESPACE)) { "insightops" } else { $env:NAMESPACE }
+    
     $volumes = @(
         "postgres_data",
         "grafana_data",
@@ -974,13 +1071,25 @@ function Setup-DockerVolumes {
     )
     
     try {
+        Write-Host "Setting up Docker volumes with namespace: $namespace" -ForegroundColor Cyan
+        
         foreach ($vol in $volumes) {
-            $volumeName = "${NAMESPACE:-insightops}_$vol"
-            if (-not (docker volume ls --filter "name=$volumeName" -q)) {
+            $volumeName = "${namespace}_$vol"
+            
+            # Check if volume exists
+            $existingVolume = docker volume ls --quiet --filter "name=^${volumeName}$"
+            
+            if (-not $existingVolume) {
                 Write-Host "Creating Docker volume: $volumeName" -ForegroundColor Yellow
-                docker volume create --name $volumeName
+                $result = docker volume create --name $volumeName 2>&1
+                
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Error "Failed to create volume $volumeName : $result"
+                    return $false
+                }
+                Write-Host "✓ Successfully created volume: $volumeName" -ForegroundColor Green
             } else {
-                Write-Host "Volume exists: $volumeName" -ForegroundColor Green
+                Write-Host "✓ Volume exists: $volumeName" -ForegroundColor Green
             }
         }
         return $true

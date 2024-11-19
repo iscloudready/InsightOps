@@ -14,8 +14,13 @@ using Polly.Extensions.Http;
 using Serilog;
 using Serilog.Events;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddHealthChecks()
+    .AddCheck("self", () => HealthCheckResult.Healthy());
 
 // Configure Configuration Sources
 builder.Configuration
@@ -125,6 +130,25 @@ builder.Services.AddOpenTelemetry()
     });
 
 var app = builder.Build();
+
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        var response = new
+        {
+            status = report.Status.ToString(),
+            checks = report.Entries.Select(x => new
+            {
+                name = x.Key,
+                status = x.Value.Status.ToString(),
+                description = x.Value.Description
+            })
+        };
+        await JsonSerializer.SerializeAsync(context.Response.Body, response);
+    }
+});
 
 // Configure Error Handling
 app.UseExceptionHandler(errorApp =>

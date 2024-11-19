@@ -32,9 +32,9 @@ WORKDIR /app
 COPY --from=publish /app/publish .
 
 # Create keys directory with proper permissions
-RUN mkdir -p /app/keys && \
-    chown -R appuser:appgroup /app/keys && \
-    chmod 755 /app/keys
+RUN mkdir -p /app/Keys && \
+    chown -R appuser:appgroup /app/Keys && \
+    chmod 755 /app/Keys
 
 USER appuser
 ENV ASPNETCORE_ENVIRONMENT=Docker
