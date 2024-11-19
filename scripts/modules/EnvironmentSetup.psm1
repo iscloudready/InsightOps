@@ -341,10 +341,11 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
-      - DataProtection__Keys=/keys
+      - DataProtection__Keys=/app/keys
+    user: "1001:1001" 
     volumes:
       - ${PROJECT_ROOT:-..}/FrontendService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
-      - frontend_keys:/keys
+      - keys_data:/app/Keys
     ports:
       - "${FRONTEND_PORT:-7144}:80"
     depends_on:
@@ -444,6 +445,13 @@ volumes:
     name: ${NAMESPACE:-insightops}_loki_wal
   frontend_keys:
     name: ${NAMESPACE:-insightops}_frontend_keys
+  keys_data:
+    name: ${NAMESPACE:-insightops}_keys_data
+    driver: local
+    driver_opts:
+      type: none
+      device: ${CONFIG_PATH}/keys
+      o: bind
 
 networks:
   default:

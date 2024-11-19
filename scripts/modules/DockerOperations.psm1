@@ -52,16 +52,25 @@ function Reset-DockerEnvironment {
         $env:CONFIG_PATH = Join-Path $projectRoot "Configurations"
         $dockerComposePath = Join-Path $env:CONFIG_PATH "docker-compose.yml"
 
+        # Print environment info
         Write-Host "Project Root: $projectRoot" -ForegroundColor Cyan
         Write-Host "Config Path: $($env:CONFIG_PATH)" -ForegroundColor Cyan
         Write-Host "Docker Compose Path: $dockerComposePath" -ForegroundColor Cyan
 
+        # Stop containers
         Write-Host "Stopping all containers..." -ForegroundColor Yellow
         docker-compose -f $dockerComposePath down --volumes --remove-orphans
-        
+
+        # Clean up images
         Write-Host "Cleaning up insightops resources..." -ForegroundColor Yellow
         docker images -q "*insightops*" | ForEach-Object { docker rmi $_ -f }
-        
+
+        # Setup volumes
+        Write-Host "Setting up Docker volumes..." -ForegroundColor Yellow
+        if (-not (Setup-DockerVolumes)) {
+            throw "Failed to setup Docker volumes"
+        }
+
         Write-Host "Docker environment reset complete" -ForegroundColor Green
         return $true
     }
@@ -342,38 +351,6 @@ function Start-DockerServices {
         return $false
     }
 }
-
-function _Start-DockerServices { 
-    [CmdletBinding()]
-    param()
-    
-    try {
-        Write-Host "`nStarting Docker services..." -ForegroundColor Cyan
-
-        # Set the CONFIG_PATH environment variable for Docker Compose
-        $env:CONFIG_PATH = $script:CONFIG_PATH  
-        Write-Host "Config Path: $script:CONFIG_PATH"
-
-        if (-not (Test-Path $script:DOCKER_COMPOSE_PATH)) {
-            throw "Docker Compose file not found at: $script:DOCKER_COMPOSE_PATH"
-        }
-
-        docker-compose -f $script:DOCKER_COMPOSE_PATH up -d
-
-        Write-Host "`nContainer Status:" -ForegroundColor Cyan
-        docker-compose -f $script:DOCKER_COMPOSE_PATH ps
-
-        Write-Host "`nServices started successfully" -ForegroundColor Green
-        return $true
-    }
-    catch {
-        Write-Error "Failed to start services: $_"
-        return $false
-    }
-}
-
-# Add this function to your existing DockerOperations.psm1
-# Location: D:\Users\Pradeep\Downloads\Grafana solution architect demo\GrafanaDemo\InsightOps\scripts\Modules\DockerOperations.psm1
 
 function Get-DetailedServiceLogs {
     [CmdletBinding()]
@@ -818,35 +795,64 @@ datasources:
 }
 
 function Rebuild-DockerService {
+    param (
+        [string]$ServiceName = $null
+    )
+
+    Test-PathOrFail -Path $script:DOCKER_COMPOSE_PATH -Message "Docker Compose configuration not found"
+
+    # Create keys directory with proper permissions
+    $keysPath = Join-Path $env:CONFIG_PATH "keys"
+    if (-not (Test-Path $keysPath)) {
+        New-Item -ItemType Directory -Path $keysPath -Force
+    }
+
+    # Setup volumes
+    Setup-DockerVolumes
+
+    if ($ServiceName) {
+        Write-Host "Rebuilding service: $ServiceName"
+        docker-compose -f $script:DOCKER_COMPOSE_PATH build $ServiceName
+        docker-compose -f $script:DOCKER_COMPOSE_PATH up -d $ServiceName
+    } else {
+        Write-Host "Rebuilding all services"
+        docker-compose -f $script:DOCKER_COMPOSE_PATH build
+        docker-compose -f $script:DOCKER_COMPOSE_PATH up -d
+    }
+}
+
+function _Rebuild-DockerService {
     [CmdletBinding()]
     param([string]$ServiceName)
     try {
         $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-        $configPath = Join-Path $projectRoot "Configurations"
-        $dockerComposePath = Join-Path $configPath "docker-compose.yml"
-        
-        # Set environment variables explicitly
-        $env:CONFIG_PATH = $configPath
-        Write-Host "Set CONFIG_PATH: $($env:CONFIG_PATH)"
-        
-        # Generate docker-compose with corrected paths
-        $dockerComposeContent = Get-DockerComposeConfig
-        # Fix volume paths to avoid duplication
-        $dockerComposeContent = $dockerComposeContent -replace '${CONFIG_PATH:-\./Configurations}/Configurations/', '${CONFIG_PATH:-./Configurations}/'
-        
-        Set-Content -Path $dockerComposePath -Value $dockerComposeContent -Force
-        
-        # Execute docker-compose commands with environment variable
-        $env:COMPOSE_PROJECT_NAME = "insightops"
-        
+        $env:PROJECT_ROOT = $projectRoot
+        $env:CONFIG_PATH = Join-Path $projectRoot "Configurations"
+        $dockerComposePath = Join-Path $env:CONFIG_PATH "docker-compose.yml"
+
+        # Wait for Docker to be ready
+        $retries = 5
+        while ($retries -gt 0) {
+            try {
+                docker info > $null
+                break
+            }
+            catch {
+                Write-Host "Waiting for Docker..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 5
+                $retries--
+            }
+        }
+
+        if ($retries -eq 0) {
+            throw "Docker is not responding"
+        }
+
+        # Rest of your existing code...
         if ([string]::IsNullOrWhiteSpace($ServiceName)) {
             docker-compose -f $dockerComposePath build --no-cache
             docker-compose -f $dockerComposePath up -d
-        } else {
-            docker-compose -f $dockerComposePath build --no-cache $ServiceName
-            docker-compose -f $dockerComposePath up -d $ServiceName
         }
-        return $true
     }
     catch {
         Write-Error "Failed to rebuild service: $_"
@@ -941,8 +947,53 @@ function Test-PreRebuildRequirements {
     return $allPassed
 }
 
+function Test-PathOrFail {
+    param (
+        [Parameter(Mandatory)]
+        [string]$Path,
+        [string]$Message
+    )
+
+    if (-not (Test-Path $Path)) {
+        throw $Message
+    }
+}
+
+function Setup-DockerVolumes {
+    [CmdletBinding()]
+    param()
+    
+    $volumes = @(
+        "postgres_data",
+        "grafana_data",
+        "prometheus_data",
+        "loki_data",
+        "tempo_data",
+        "frontend_keys",
+        "keys_data"
+    )
+    
+    try {
+        foreach ($vol in $volumes) {
+            $volumeName = "${NAMESPACE:-insightops}_$vol"
+            if (-not (docker volume ls --filter "name=$volumeName" -q)) {
+                Write-Host "Creating Docker volume: $volumeName" -ForegroundColor Yellow
+                docker volume create --name $volumeName
+            } else {
+                Write-Host "Volume exists: $volumeName" -ForegroundColor Green
+            }
+        }
+        return $true
+    }
+    catch {
+        Write-Error "Failed to setup Docker volumes: $_"
+        return $false
+    }
+}
+
 # Export functions
 Export-ModuleMember -Function @(
+    'Setup-DockerVolumes',
     'Show-DockerStatus',
     'Start-DockerServices',
     'Stop-DockerServices',

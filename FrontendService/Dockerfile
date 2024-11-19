@@ -30,6 +30,12 @@ RUN dotnet publish "FrontendService.csproj" -c Release -o /app/publish /p:UseApp
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+
+# Create keys directory with proper permissions
+RUN mkdir -p /app/keys && \
+    chown -R appuser:appgroup /app/keys && \
+    chmod 755 /app/keys
+
 USER appuser
 ENV ASPNETCORE_ENVIRONMENT=Docker
 ENTRYPOINT ["dotnet", "FrontendService.dll"]

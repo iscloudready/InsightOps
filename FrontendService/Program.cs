@@ -17,8 +17,13 @@ using FrontendService.Extensions;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Serilog.Core;
+using System.IO;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Ensure the Data Protection keys directory exists
+var keysDirectory = "/app/Keys";
+Directory.CreateDirectory(keysDirectory);
 
 // Configure logging first
 builder.Services.AddLogging(loggingBuilder =>
@@ -31,8 +36,8 @@ builder.Services.AddLogging(loggingBuilder =>
 });
 
 builder.Services.AddDataProtection()
-    .PersistKeysToFileSystem(new DirectoryInfo("/keys"))
-    .DisableAutomaticKeyGeneration();
+    .PersistKeysToFileSystem(new DirectoryInfo(keysDirectory))
+    .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
 
 // Configure Serilog based on environment
 var lokiUrl = builder.Environment.IsDevelopment()
@@ -116,13 +121,16 @@ builder.Services.AddHttpClient("ApiGateway", client =>
 builder.Services.AddHealthChecks()
     .AddUrlGroup(
         new Uri($"{builder.Configuration["ServiceUrls:ApiGateway"]}/health"),
-        name: "api-gateway")
+        name: "api-gateway",
+        failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded)
     .AddUrlGroup(
         new Uri($"{builder.Configuration["ServiceUrls:OrderService"]}/health"),
-        name: "orders-api")
+        name: "orders-api",
+        failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded)
     .AddUrlGroup(
         new Uri($"{builder.Configuration["ServiceUrls:InventoryService"]}/health"),
-        name: "inventory-api");
+        name: "inventory-api",
+        failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded);
 
 // Configure monitoring endpoints
 var tempoEndpoint = builder.Environment.IsDevelopment()
@@ -160,10 +168,6 @@ builder.WebHost.ConfigureKestrel(options =>
 {
     options.ListenAnyIP(5010);
 });
-
-// Disable Data Protection warnings
-builder.Services.AddDataProtection()
-    .DisableAutomaticKeyGeneration();
 
 var app = builder.Build();
 
