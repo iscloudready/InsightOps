@@ -37,7 +37,8 @@ builder.Services.AddLogging(loggingBuilder =>
 
 builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(keysDirectory))
-    .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
+    .SetDefaultKeyLifetime(TimeSpan.FromDays(90))
+    .SetApplicationName("FrontendService");
 
 // Configure Serilog based on environment
 var lokiUrl = builder.Environment.IsDevelopment()
@@ -166,7 +167,7 @@ builder.Services.AddOpenTelemetry()
 // Configure Kestrel
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenAnyIP(5010);
+    options.ListenAnyIP(80); // 5010
 });
 
 var app = builder.Build();

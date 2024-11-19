@@ -52,18 +52,24 @@ function Reset-DockerEnvironment {
         $env:CONFIG_PATH = Join-Path $projectRoot "Configurations"
         $dockerComposePath = Join-Path $env:CONFIG_PATH "docker-compose.yml"
 
+        # Set default namespace if not set
+        if (-not $env:NAMESPACE) {
+            $env:NAMESPACE = "insightops"
+        }
+
         # Print environment info
         Write-Host "Project Root: $projectRoot" -ForegroundColor Cyan
         Write-Host "Config Path: $($env:CONFIG_PATH)" -ForegroundColor Cyan
         Write-Host "Docker Compose Path: $dockerComposePath" -ForegroundColor Cyan
+        Write-Host "Namespace: $($env:NAMESPACE)" -ForegroundColor Cyan
 
-        # Stop containers
+        # Stop and cleanup containers
         Write-Host "Stopping all containers..." -ForegroundColor Yellow
         docker-compose -f $dockerComposePath down --volumes --remove-orphans
 
         # Clean up images
-        Write-Host "Cleaning up insightops resources..." -ForegroundColor Yellow
-        docker images -q "*insightops*" | ForEach-Object { docker rmi $_ -f }
+        Write-Host "Cleaning up resources..." -ForegroundColor Yellow
+        docker images -q "*$($env:NAMESPACE)*" | ForEach-Object { docker rmi $_ -f }
 
         # Setup volumes
         Write-Host "Setting up Docker volumes..." -ForegroundColor Yellow
@@ -963,24 +969,35 @@ function Setup-DockerVolumes {
     [CmdletBinding()]
     param()
     
-    $volumes = @(
-        "postgres_data",
-        "grafana_data",
-        "prometheus_data",
-        "loki_data",
-        "tempo_data",
-        "frontend_keys",
-        "keys_data"
-    )
-    
     try {
+        # Define base volume names
+        $volumes = @(
+            "postgres_data",
+            "grafana_data",
+            "prometheus_data",
+            "loki_data",
+            "tempo_data",
+            "frontend_keys",
+            "keys_data"
+        )
+
+        # Get namespace from environment or use default
+        $namespace = if ($env:NAMESPACE) { $env:NAMESPACE } else { "insightops" }
+        
         foreach ($vol in $volumes) {
-            $volumeName = "${NAMESPACE:-insightops}_$vol"
-            if (-not (docker volume ls --filter "name=$volumeName" -q)) {
-                Write-Host "Creating Docker volume: $volumeName" -ForegroundColor Yellow
-                docker volume create --name $volumeName
+            $volumeName = "$namespace`_$vol"
+            Write-Host "Checking volume: $volumeName" -ForegroundColor Yellow
+            
+            if (-not (docker volume ls --filter "name=^$volumeName$" -q)) {
+                Write-Host "Creating Docker volume: $volumeName" -ForegroundColor Green
+                $result = docker volume create --name $volumeName 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "Failed to create volume $volumeName : $result"
+                } else {
+                    Write-Host "Successfully created volume: $volumeName" -ForegroundColor Green
+                }
             } else {
-                Write-Host "Volume exists: $volumeName" -ForegroundColor Green
+                Write-Host "Volume exists: $volumeName" -ForegroundColor Cyan
             }
         }
         return $true

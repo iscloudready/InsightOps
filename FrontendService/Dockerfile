@@ -38,4 +38,6 @@ RUN mkdir -p /app/keys && \
 
 USER appuser
 ENV ASPNETCORE_ENVIRONMENT=Docker
+ENV ASPNETCORE_URLS=http://+:5010
+ENV ASPNETCORE_HTTP_PORTS=5010
 ENTRYPOINT ["dotnet", "FrontendService.dll"]

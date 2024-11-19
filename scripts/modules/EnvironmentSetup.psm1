@@ -342,6 +342,7 @@ services:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
       - DataProtection__Keys=/app/keys
+      - ASPNETCORE_HTTP_PORTS=5010
     user: "1001:1001" 
     volumes:
       - ${PROJECT_ROOT:-..}/FrontendService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
