@@ -39,16 +39,19 @@ builder.Services.AddHealthChecks()
     .AddCheck("self", () => HealthCheckResult.Healthy());
 
 // Configure PostgreSQL Database connection with retry policy
-builder.Services.AddDbContext<OrderDbContext>(options =>
+builder.Services.AddDbContext<OrderDbContext>((serviceProvider, options) =>
 {
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres"),
+    var logger = serviceProvider.GetRequiredService<ILogger<OrderDbContext>>();
+    options.UseNpgsql(
+        builder.Configuration.GetConnectionString("Postgres"),
         npgsqlOptionsAction: sqlOptions =>
         {
             sqlOptions.EnableRetryOnFailure(
                 maxRetryCount: 5,
                 maxRetryDelay: TimeSpan.FromSeconds(30),
                 errorCodesToAdd: null);
-        });
+        })
+    .LogTo(message => logger.LogDebug(message), LogLevel.Information);
 });
 
 // Add OrderRepository as a scoped service
@@ -131,7 +134,7 @@ using (var scope = app.Services.CreateScope())
         logger.LogInformation("Database migration completed");
 
         // Initialize seed data
-        await DbInitializer.InitializeAsync(context);
+        await DbInitializer.InitializeAsync(context, logger);
         logger.LogInformation("Database initialization completed successfully");
     }
     catch (Exception ex)

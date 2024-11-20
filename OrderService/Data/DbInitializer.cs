@@ -1,26 +1,44 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿// OrderService/Data/DbInitializer.cs
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Npgsql;
 using OrderService.Models;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace OrderService.Data
 {
     public static class DbInitializer
     {
-        public static async Task InitializeAsync(OrderDbContext context)
+        public static async Task InitializeAsync(
+            OrderDbContext context,
+            ILogger logger)
         {
             try
             {
-                // Apply migrations to ensure the schema is up-to-date
-                await context.Database.MigrateAsync();
-                Console.WriteLine("Database migrations applied successfully.");
+                logger.LogInformation("Starting database initialization");
 
-                // Seed data only if the Orders table is empty
-                if (!context.Orders.Any())
+                // Check if we can connect to the database
+                if (!await context.Database.CanConnectAsync())
                 {
-                    Console.WriteLine("Seeding data into Orders table...");
+                    logger.LogError("Cannot connect to the database");
+                    throw new Exception("Database connection failed");
+                }
+
+                // Check for pending migrations
+                var pendingMigrations = await context.Database.GetPendingMigrationsAsync();
+                if (pendingMigrations.Any())
+                {
+                    logger.LogInformation("Applying {Count} pending migrations", pendingMigrations.Count());
+                    foreach (var migration in pendingMigrations)
+                    {
+                        logger.LogInformation("Applying migration: {Migration}", migration);
+                    }
+                    await context.Database.MigrateAsync();
+                }
+
+                // Check if data seeding is needed
+                if (!await context.Orders.AnyAsync())
+                {
+                    logger.LogInformation("Seeding initial data");
 
                     var orders = new List<Order>
                     {
@@ -42,31 +60,67 @@ namespace OrderService.Data
                         }
                     };
 
-                    await context.Orders.AddRangeAsync(orders);
-                    await context.SaveChangesAsync();
-
-                    Console.WriteLine("Database seeding completed.");
+                    try
+                    {
+                        await context.Orders.AddRangeAsync(orders);
+                        await context.SaveChangesAsync();
+                        logger.LogInformation("Successfully seeded {Count} orders", orders.Count);
+                    }
+                    catch (DbUpdateException ex)
+                    {
+                        logger.LogError(ex, "Error occurred while seeding data");
+                        throw new Exception("Failed to seed initial data", ex);
+                    }
                 }
                 else
                 {
-                    Console.WriteLine("Orders table already contains data, skipping seeding.");
+                    logger.LogInformation("Database already contains data, skipping seeding");
                 }
-            }
-            catch (DbUpdateException dbEx)
-            {
-                Console.WriteLine($"Database update error: {dbEx.Message}");
-                // Handle database update issues, such as unique constraint violations
-                throw;
-            }
-            catch (InvalidOperationException invEx)
-            {
-                Console.WriteLine($"Invalid operation: {invEx.Message}");
-                // Handle invalid EF operations, such as schema mismatches
-                throw;
+
+                logger.LogInformation("Database initialization completed successfully");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+                logger.LogError(ex, "An error occurred during database initialization");
+
+                if (ex is DbUpdateException dbEx)
+                {
+                    logger.LogError("Database Update Error Details:");
+                    if (dbEx.InnerException != null)
+                    {
+                        logger.LogError("Inner Exception: {Message}", dbEx.InnerException.Message);
+                    }
+                }
+                else if (ex is PostgresException pgEx)
+                {
+                    logger.LogError("Postgres Error Details:");
+                    logger.LogError("  Error Code: {Code}", pgEx.SqlState);
+                    logger.LogError("  Error Message: {Message}", pgEx.MessageText);
+                    logger.LogError("  Detail: {Detail}", pgEx.Detail);
+                }
+
+                // Always throw the exception to prevent the application from starting with an incompletely initialized database
+                throw new Exception("Database initialization failed", ex);
+            }
+        }
+
+        private static async Task EnsureTableExists(OrderDbContext context, string tableName, ILogger logger)
+        {
+            try
+            {
+                // Check if table exists
+                var exists = await context.Database.ExecuteSqlRawAsync(
+                    $"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = '{tableName}')");
+
+                if (exists == 0)
+                {
+                    logger.LogWarning("Table {TableName} does not exist", tableName);
+                    // Let migrations handle table creation
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error checking table existence: {TableName}", tableName);
                 throw;
             }
         }
