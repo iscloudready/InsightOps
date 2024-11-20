@@ -2,6 +2,16 @@
 
 **InsightOps** is a comprehensive observability demo showcasing microservices monitoring using .NET 8, OpenTelemetry, Prometheus, Grafana, Loki, and Tempo. This project serves as both a learning tool and a production-ready template for enterprise observability.
 
+# InsightOps
+
+![Build Status](https://github.com/iscloudready/InsightOps/actions/workflows/main.yml/badge.svg)
+![GitHub Issues](https://img.shields.io/github/issues/iscloudready/InsightOps)
+![GitHub Pull Requests](https://img.shields.io/github/issues-pr/iscloudready/InsightOps)
+![Contributors](https://img.shields.io/github/contributors/iscloudready/InsightOps)
+![Coverage](https://codecov.io/gh/iscloudready/InsightOps/branch/main/graph/badge.svg)
+![Last Commit](https://img.shields.io/github/last-commit/iscloudready/InsightOps)
+![License](https://img.shields.io/github/license/iscloudready/InsightOps)
+
 ## Quick Start
 ```powershell
 # Clone and run (Automated setup)
