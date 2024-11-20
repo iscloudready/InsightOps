@@ -11,7 +11,6 @@
 ![GitHub Contributors](https://img.shields.io/github/contributors/iscloudready/InsightOps)
 ![GitHub Last Commit](https://img.shields.io/github/last-commit/iscloudready/InsightOps)
 
-![Build Status](https://github.com/iscloudready/InsightOps/actions/workflows/main.yml/badge.svg)
 ![Contributors](https://img.shields.io/github/contributors/iscloudready/InsightOps)
 ![Coverage](https://codecov.io/gh/iscloudready/InsightOps/branch/main/graph/badge.svg)
 ![Last Commit](https://img.shields.io/github/last-commit/iscloudready/InsightOps)
