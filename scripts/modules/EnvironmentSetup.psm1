@@ -6,6 +6,9 @@ if (-not (Get-Module Core)) {
     throw "Core module not loaded. Please ensure Core.psm1 is imported first."
 }
 
+# Add to existing EnvironmentSetup.psm1
+#Import-Module (Join-Path $PSScriptRoot "Monitoring.psm1")
+
 # Import paths and settings from Core module
 $script:CONFIG_PATH = (Get-Variable -Name CONFIG_PATH -Scope Global).Value
 $script:REQUIRED_PATHS = (Get-Variable -Name REQUIRED_PATHS -Scope Global).Value
@@ -587,6 +590,32 @@ function Initialize-Environment {
         Write-Info "`nInitializing environment: $Environment"
         Write-Info "Using configuration path: $script:CONFIG_PATH"
 
+                # Create all necessary monitoring directories
+        Write-Info "Creating monitoring directories..."
+        $monitoringDirs = @(
+            "src/FrontendService/Monitoring",
+            "Configurations/grafana/dashboards",
+            "Configurations/prometheus/rules"
+        )
+
+        foreach ($dir in $monitoringDirs) {
+            $fullPath = Join-Path $script:PROJECT_ROOT $dir
+            if (-not (Test-Path $fullPath)) {
+                New-Item -ItemType Directory -Path $fullPath -Force | Out-Null
+                Write-Success "  [Created] $dir"
+            } else {
+                Write-Info "  [Exists] $dir"
+            }
+        }
+
+        # Copy Monitoring module
+        $modulesPath = Join-Path $script:PROJECT_ROOT "scripts/Modules"
+        $monitoringModulePath = Join-Path $modulesPath "Monitoring.psm1"
+        if (-not (Test-Path $monitoringModulePath)) {
+            Copy-Item (Join-Path $PSScriptRoot "Monitoring.psm1") $monitoringModulePath -Force
+            Write-Success "  [Created] Monitoring.psm1 module"
+        }
+
         # Check if loki_wal directory exists and create it if missing
         Write-Info "Ensuring loki_wal directory exists and has correct permissions..."
         if (-not (Test-Path -Path "$script:CONFIG_PATH\loki_wal")) {
@@ -601,6 +630,10 @@ function Initialize-Environment {
         # Ensure host volume path for Tempo data is created with permissions
         Write-Info "Ensuring host volume path for Tempo data..."
         Ensure-HostVolumePath -Path $hostVolumePath
+
+        # Add monitoring initialization
+        Write-Info "Initializing monitoring components..."
+        Initialize-Monitoring -ConfigPath $script:CONFIG_PATH
 
         # Manually create paths for Docker permissions
         Write-Info "Setting Docker permissions for data directories..."
@@ -913,6 +946,57 @@ function Test-Configuration {
         Write-Host "Configuration check failed: $_" -ForegroundColor Red
         return $false
     }
+}
+
+# Add this function to EnvironmentSetup.psm1
+function Initialize-GrafanaDashboards {
+    param (
+        [string]$ConfigPath
+    )
+
+    # Generate Overview Dashboard
+    $overviewDashboard = Get-ServiceOverviewDashboard
+    $dashboardPath = Join-Path $ConfigPath "grafana/dashboards/overview.json"
+    Write-ConfigFile -Path $dashboardPath -Content $overviewDashboard
+    
+    # Generate Service-Specific Dashboards
+    foreach ($service in @("Order", "Inventory", "Gateway")) {
+        $dashboard = Get-ServiceDashboard -ServiceName $service
+        $path = Join-Path $ConfigPath "grafana/dashboards/$($service.ToLower()).json"
+        Write-ConfigFile -Path $path -Content $dashboard
+    }
+}
+
+function Get-ServiceDashboard {
+    param ([string]$ServiceName)
+    
+    return @"
+{
+  "title": "$ServiceName Dashboard",
+  "panels": [
+    {
+      "title": "Request Rate",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(http_requests_total{service=\"$($ServiceName.ToLower())\"}[5m])"
+        }
+      ]
+    },
+    {
+      "title": "Error Rate",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(http_requests_errors_total{service=\"$($ServiceName.ToLower())\"}[5m])"
+        }
+      ]
+    }
+  ]
+}
+"@
 }
 
 # Export module members

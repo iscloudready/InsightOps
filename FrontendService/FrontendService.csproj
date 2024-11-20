@@ -11,6 +11,7 @@
 
 	<ItemGroup>
 		<Compile Remove="Models\OrderTrendData.cs" />
+		<Compile Remove="Monitoring\MetricsCollector.cs" />
 	</ItemGroup>
 
 	<ItemGroup>

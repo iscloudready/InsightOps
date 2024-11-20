@@ -21,6 +21,8 @@ using System.IO;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using FrontendService.Monitoring;  // New monitoring namespace
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,6 +38,25 @@ builder.Services.AddLogging(loggingBuilder =>
     loggingBuilder.AddDebug();
     loggingBuilder.SetMinimumLevel(builder.Environment.IsDevelopment() ?
         LogLevel.Debug : LogLevel.Information);
+});
+
+// Add after existing builder.Services configurations:
+builder.Services.AddSingleton<RealTimeMetricsCollector>();
+//builder.Services.AddSingleton<CustomMetricsCollector>();
+
+// Add monitoring configuration
+builder.Services.Configure<MonitoringOptions>(options =>
+{
+    options.MetricsInterval = TimeSpan.FromSeconds(10);
+    options.RetentionDays = 7;
+    options.EnableDetailedMetrics = true;
+});
+
+// Configure SignalR for real-time updates
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = true;
+    options.MaximumReceiveMessageSize = 102400;
 });
 
 builder.Services.AddDataProtection()
@@ -88,6 +109,7 @@ if (builder.Environment.IsDevelopment() || builder.Environment.EnvironmentName =
 // First register core services
 builder.Services.AddSingleton<MetricsCollector>();
 builder.Services.AddSingleton<SystemMetricsCollector>();
+builder.Services.AddHostedService<MetricsBackgroundService>();
 
 // Register application services
 builder.Services.AddScoped<IOrderService, OrderService>();
@@ -146,6 +168,12 @@ var tempoEndpoint = builder.Environment.IsDevelopment()
     ? "http://localhost:4317"
     : "http://tempo:4317";
 
+// Add to Program.cs
+//builder.Services.AddHealthChecks()
+//    .AddCheck<DatabaseHealthCheck>("database")
+//    .AddCheck<ApiGatewayHealthCheck>("api-gateway")
+//    .AddCheck<StorageHealthCheck>("storage");
+
 // Configure OpenTelemetry
 builder.Services.AddOpenTelemetry()
     .WithTracing(tracerProviderBuilder =>
@@ -181,6 +209,8 @@ builder.WebHost.ConfigureKestrel(options =>
 
 var app = builder.Build();
 
+// Add SignalR endpoint
+//app.MapHub("/metrics-hub");
 // Program.cs
 app.UseHealthChecks("/health", new HealthCheckOptions
 {
@@ -202,6 +232,34 @@ app.UseHealthChecks("/health", new HealthCheckOptions
         });
     }
 });
+
+app.Use(async (context, next) =>
+{
+    var metricsCollector = context.RequestServices
+        .GetRequiredService<RealTimeMetricsCollector>();
+
+    var sw = Stopwatch.StartNew();
+    try
+    {
+        metricsCollector.RecordApiRequest(
+            context.Request.Path,
+            context.Request.Method);
+
+        await next();
+
+        sw.Stop();
+        metricsCollector.RecordApiResponse(
+            context.Request.Path,
+            sw.Elapsed.TotalSeconds);
+    }
+    catch
+    {
+        sw.Stop();
+        throw;
+    }
+});
+
+app.MapHub<MetricsHub>("/metrics-hub");
 
 // Configure error handling with detailed messages
 if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
