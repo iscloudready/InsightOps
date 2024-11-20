@@ -111,7 +111,12 @@
                             </thead>
                             <tbody>
                                 <tr id="orderserviceRow">
-                                    <td>Order Service</td>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-shopping-cart text-primary"></i>
+                                            Order Service
+                                        </div>
+                                    </td>
                                     <td><span class="badge bg-secondary">Unknown</span></td>
                                     <td>-</td>
                                     <td>-</td>
@@ -135,7 +140,6 @@
             </div>
         </div>
 
-        <!-- System Resources -->
         <div class="col-xl-4">
             <div class="card shadow mb-4">
                 <div class="card-header py-3">
@@ -173,29 +177,80 @@
                     </div>
                 </div>
             </div>
+        </div>
 
-            <!-- Additional Health Info Card -->
-            <div class="card shadow">
-                <div class="card-header py-3">
-                    <h6 class="m-0 fw-bold text-primary">Health Summary</h6>
+        <!-- Add this after the Microservices Status card -->
+        <div class="col-xl-8">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3 d-flex justify-content-between align-items-center">
+                    <h6 class="m-0 fw-bold text-primary">Docker Container Status</h6>
                 </div>
                 <div class="card-body">
-                    <div id="healthSummary">
-                        <div class="d-flex justify-content-between mb-2">
-                            <span>Total Services:</span>
-                            <span id="totalServices">3</span>
-                        </div>
-                        <div class="d-flex justify-content-between mb-2">
-                            <span>Healthy Services:</span>
-                            <span id="healthyServices">0</span>
-                        </div>
-                        <div class="d-flex justify-content-between">
-                            <span>System Uptime:</span>
-                            <span id="systemUptime">-</span>
-                        </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Container</th>
+                                    <th>Status</th>
+                                    <th>CPU</th>
+                                    <th>Memory</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr id="frontendContainer">
+                                    <td>Frontend</td>
+                                    <td><span class="badge bg-secondary">Unknown</span></td>
+                                    <td>0%</td>
+                                    <td>0 MB</td>
+                                </tr>
+                                <tr id="apiContainer">
+                                    <td>API Gateway</td>
+                                    <td><span class="badge bg-secondary">Unknown</span></td>
+                                    <td>0%</td>
+                                    <td>0 MB</td>
+                                </tr>
+                                <tr id="dbContainer">
+                                    <td>Database</td>
+                                    <td><span class="badge bg-secondary">Unknown</span></td>
+                                    <td>0%</td>
+                                    <td>0 MB</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
+        </div>
+
+        <!-- System Resources -->
+        <div class="col-xl-4">
+
+            <!-- Additional Health Info Card -->
+            <!-- Health Summary -->
+            <div class="card shadow">
+                <div class="card-header py-3">
+                    <h6 class="m-0 fw-bold text-primary">
+                        <i class="fas fa-chart-line me-1"></i>
+                        Health Summary
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div id="healthSummary">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <span class="fw-bold">Total Services</span>
+                            <span id="totalServices" class="badge bg-primary">3</span>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <span class="fw-bold">Healthy Services</span>
+                            <span id="healthyServices" class="badge bg-success">0</span>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="fw-bold">System Uptime</span>
+                            <span id="systemUptime" class="badge bg-info">-</span>
+                        </div>
+                    </div>
+                </div>
+
         </div>
     </div>
 </div>
@@ -290,6 +345,31 @@
             });
         }
 
+                // Add to your updateDashboard function after updateServiceTable
+        async function updateDockerStatus() {
+            try {
+                const dockerStats = await fetch('/Home/GetDockerStats').then(r => r.json());
+                dockerStats.forEach(container => {
+                    const row = document.getElementById(`${container.name.toLowerCase()}Container`);
+                    if (row) {
+                        const cells = row.querySelectorAll('td');
+                        const badge = cells[1].querySelector('.badge');
+
+                        if (badge) {
+                            badge.className = `badge ${container.running ? 'bg-success' : 'bg-danger'}`;
+                            badge.textContent = container.running ? 'Running' : 'Stopped';
+                        }
+
+                        cells[2].textContent = container.cpu + '%';
+                        cells[3].textContent = container.memory;
+                        cells[4].textContent = container.uptime;
+                    }
+                });
+            } catch (error) {
+                console.error('Error updating docker status:', error);
+            }
+        }
+
         function getStatusClass(status) {
             switch (status?.toLowerCase()) {
                 case 'healthy':
@@ -348,4 +428,108 @@
             refreshButton.addEventListener('click', updateDashboard);
         }
     </script>
+
+    <style>
+        /* Card Styling */
+        .card {
+            border: none;
+            margin-bottom: 1.5rem;
+            border-radius: 0.35rem;
+        }
+
+        .border-left-primary {
+            border-left: 4px solid #4e73df !important;
+            box-shadow: 0 .15rem 1.75rem 0 rgba(58,59,69,.15);
+        }
+
+        .border-left-success {
+            border-left: 4px solid #1cc88a !important;
+            box-shadow: 0 .15rem 1.75rem 0 rgba(58,59,69,.15);
+        }
+
+        .border-left-info {
+            border-left: 4px solid #36b9cc !important;
+            box-shadow: 0 .15rem 1.75rem 0 rgba(58,59,69,.15);
+        }
+
+        .border-left-warning {
+            border-left: 4px solid #f6c23e !important;
+            box-shadow: 0 .15rem 1.75rem 0 rgba(58,59,69,.15);
+        }
+
+        /* Text Colors */
+        .text-gray-300 {
+            color: #dddfeb !important;
+        }
+
+        .text-gray-800 {
+            color: #5a5c69 !important;
+        }
+
+        /* Icon Styling */
+        .fa-2x {
+            font-size: 2rem;
+            margin-right: 0.5rem;
+        }
+
+        .card-header {
+            background-color: #f8f9fc;
+            border-bottom: 1px solid #e3e6f0;
+            padding: 1rem 1.25rem;
+        }
+
+        /* Service Status Icons */
+        .service-icon {
+            margin-right: 0.75rem;
+            width: 1.25rem;
+            text-align: center;
+        }
+
+        /* Table Styling */
+        .table > thead > tr > th {
+            background-color: #f8f9fc;
+            border-bottom: 2px solid #e3e6f0;
+            font-weight: 700;
+        }
+
+        /* Progress Bars */
+        .progress {
+            height: 0.75rem;
+            background-color: #eaecf4;
+            border-radius: 0.35rem;
+            margin-bottom: 1rem;
+        }
+
+        .progress-bar {
+            transition: width 0.6s ease;
+        }
+
+        /* Badge Styling */
+        .badge {
+            padding: 0.5em 0.75em;
+            font-weight: 600;
+            font-size: 0.75rem;
+        }
+
+        /* Refresh Button */
+        [data-refresh] {
+            transition: all 0.2s;
+        }
+
+            [data-refresh]:active {
+                transform: scale(0.95);
+            }
+
+        /* Icons in Table */
+        td .fas,
+        td .fab {
+            margin-right: 0.5rem;
+            width: 1rem;
+            text-align: center;
+        }
+
+        .fas {
+            display: inline-block;
+        }
+    </style>
 }

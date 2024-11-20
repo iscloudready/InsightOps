@@ -3,54 +3,128 @@
 
 <div class="container-fluid px-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1>Orders Management</h1>
+        <h1 class="h2">Orders Management</h1>
         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createOrderModal">
             <i class="fas fa-plus"></i> New Order
         </button>
     </div>
 
-    <div class="card mb-4">
-        <div class="card-header">
-            <i class="fas fa-table me-1"></i>
-            Orders List
+    <!-- Summary Cards -->
+    <div class="row mb-4">
+        <!-- Pending Orders Card -->
+        <div class="col-xl-4 col-md-6 mb-4">
+            <div class="card border-left-warning h-100">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-warning text-uppercase mb-1">Pending Orders</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800">
+                                @Model.Count(o => o.Status == "Pending")
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-clock fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Total Orders Card -->
+        <div class="col-xl-4 col-md-6 mb-4">
+            <div class="card border-left-primary h-100">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-primary text-uppercase mb-1">Total Orders</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800">@Model.Count()</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-shopping-cart fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Order Value Card -->
+        <div class="col-xl-4 col-md-6 mb-4">
+            <div class="card border-left-success h-100">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-success text-uppercase mb-1">Total Value</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800">
+                                @Model.Sum(o => o.TotalPrice).ToString("C")
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-dollar-sign fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Orders Table Card -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center">
+            <h6 class="m-0 fw-bold text-primary">Orders List</h6>
+            <div class="btn-group">
+                <button class="btn btn-sm btn-outline-primary" onclick="exportOrders()">
+                    <i class="fas fa-download me-1"></i>Export
+                </button>
+            </div>
         </div>
         <div class="card-body">
-            <table id="ordersTable" class="table table-striped">
-                <thead>
-                    <tr>
-                        <th>Order ID</th>
-                        <th>Item</th>
-                        <th>Quantity</th>
-                        <th>Total Price</th>
-                        <th>Status</th>
-                        <th>Order Date</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var order in Model)
-                    {
+            <div class="table-responsive">
+                <table id="ordersTable" class="table table-hover">
+                    <thead>
                         <tr>
-                            <td>@order.Id</td>
-                            <td>@order.ItemName</td>
-                            <td>@order.Quantity</td>
-                            <td>@order.TotalPrice.ToString("C")</td>
-                            <td>
-                                <span class="badge @(order.Status == "Completed" ? "bg-success" :
-                                                   order.Status == "Pending" ? "bg-warning" : "bg-secondary")">
-                                    @order.Status
-                                </span>
-                            </td>
-                            <td>@order.OrderDate.ToString("g")</td>
-                            <td>
-                                <button class="btn btn-sm btn-info" onclick="viewOrder(@order.Id)">
-                                    <i class="fas fa-eye"></i>
-                                </button>
-                            </td>
+                            <th>Order ID</th>
+                            <th>Item</th>
+                            <th>Quantity</th>
+                            <th>Total Price</th>
+                            <th>Status</th>
+                            <th>Order Date</th>
+                            <th>Actions</th>
                         </tr>
-                    }
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        @foreach (var order in Model)
+                        {
+                            <tr>
+                                <td>#@order.Id.ToString("D5")</td>
+                                <td>@order.ItemName</td>
+                                <td class="text-center">@order.Quantity</td>
+                                <td class="text-end">@order.TotalPrice.ToString("C")</td>
+                                <td>
+                                    <span class="badge @(order.Status switch {
+                                        "Completed" => "bg-success",
+                                        "Pending" => "bg-warning",
+                                        _ => "bg-secondary"
+                                    })">@order.Status</span>
+                                </td>
+                                <td>@order.OrderDate.ToString("g")</td>
+                                <td>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-info" onclick="viewOrder(@order.Id)">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        @if (order.Status == "Pending")
+                                        {
+                                            <button class="btn btn-sm btn-success" onclick="completeOrder(@order.Id)">
+                                                <i class="fas fa-check"></i>
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>
@@ -62,14 +136,39 @@
     <script>
         $(document).ready(function () {
             $('#ordersTable').DataTable({
-                order: [[5, 'desc']], // Sort by date descending
-                pageLength: 25
+                order: [[5, 'desc']],
+                pageLength: 25,
+                language: {
+                    search: "_INPUT_",
+                    searchPlaceholder: "Search orders..."
+                }
             });
         });
 
         function viewOrder(orderId) {
             // Implement order details view
-            alert('Order details for ID: ' + orderId);
+        }
+
+        function completeOrder(orderId) {
+            // Implement order completion
+        }
+
+        function exportOrders() {
+            // Implement export functionality
         }
     </script>
 }
+
+<style>
+    .border-left-primary { border-left: 4px solid #4e73df; }
+    .border-left-success { border-left: 4px solid #1cc88a; }
+    .border-left-warning { border-left: 4px solid #f6c23e; }
+    .text-gray-300 { color: #dddfeb !important; }
+    .text-gray-800 { color: #5a5c69 !important; }
+    .shadow { box-shadow: 0 .15rem 1.75rem 0 rgba(58,59,69,.15)!important; }
+
+    .table > thead > tr > th {
+        background-color: #f8f9fc;
+        border-bottom: 2px solid #e3e6f0;
+    }
+</style>

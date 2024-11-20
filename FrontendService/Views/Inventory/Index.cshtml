@@ -3,7 +3,7 @@
 
 <div class="container-fluid px-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1>Inventory Management</h1>
+        <h1 class="h2">Inventory Management</h1>
         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addInventoryModal">
             <i class="fas fa-plus"></i> Add Item
         </button>
@@ -12,16 +12,18 @@
     <div class="row mb-4">
         <!-- Low Stock Alert Card -->
         <div class="col-xl-4 col-md-6 mb-4">
-            <div class="card border-left-warning h-100">
+            <div class="card border-left-warning h-100 shadow">
                 <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
-                                Low Stock Items
-                            </div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-warning text-uppercase mb-1">Low Stock Items</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800">
                                 @Model.Count(i => i.IsLowStock)
                             </div>
+                            @if (Model.Any(i => i.IsLowStock))
+                            {
+                                <div class="text-xs text-danger mt-2">Action Required</div>
+                            }
                         </div>
                         <div class="col-auto">
                             <i class="fas fa-exclamation-triangle fa-2x text-gray-300"></i>
@@ -33,16 +35,12 @@
 
         <!-- Total Items Card -->
         <div class="col-xl-4 col-md-6 mb-4">
-            <div class="card border-left-primary h-100">
+            <div class="card border-left-primary h-100 shadow">
                 <div class="card-body">
-                    <div class="row no-gutters align-items-center">
-                        <div class="col mr-2">
-                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
-                                Total Items
-                            </div>
-                            <div class="h5 mb-0 font-weight-bold text-gray-800">
-                                @Model.Count()
-                            </div>
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-primary text-uppercase mb-1">Total Items</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800">@Model.Count()</div>
                         </div>
                         <div class="col-auto">
                             <i class="fas fa-boxes fa-2x text-gray-300"></i>
@@ -51,54 +49,82 @@
                 </div>
             </div>
         </div>
+
+        <!-- Total Value Card -->
+        <div class="col-xl-4 col-md-6 mb-4">
+            <div class="card border-left-success h-100 shadow">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-success text-uppercase mb-1">Inventory Value</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800">
+                                @Model.Sum(i => i.Price * i.Quantity).ToString("C")
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-dollar-sign fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <div class="card mb-4">
-        <div class="card-header">
-            <i class="fas fa-warehouse me-1"></i>
-            Inventory Items
+    <div class="card shadow mb-4">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center">
+            <h6 class="m-0 fw-bold text-primary">
+                <i class="fas fa-warehouse me-1"></i>
+                Inventory Items
+            </h6>
+            <div class="btn-group">
+                <button class="btn btn-sm btn-outline-primary" onclick="exportInventory()">
+                    <i class="fas fa-download me-1"></i>Export
+                </button>
+            </div>
         </div>
         <div class="card-body">
-            <table class="table table-striped" id="inventoryTable">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Quantity</th>
-                        <th>Price</th>
-                        <th>Minimum Quantity</th>
-                        <th>Status</th>
-                        <th>Last Restocked</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var item in Model)
-                    {
+            <div class="table-responsive">
+                <table class="table table-hover" id="inventoryTable">
+                    <thead>
                         <tr>
-                            <td>@item.Name</td>
-                            <td>@item.Quantity</td>
-                            <td>@item.Price.ToString("C")</td>
-                            <td>@item.MinimumQuantity</td>
-                            <td>
-                                <span class="badge @(item.IsLowStock ? "bg-danger" : "bg-success")">
-                                    @(item.IsLowStock ? "Low Stock" : "In Stock")
-                                </span>
-                            </td>
-                            <td>@item.LastRestocked.ToString("g")</td>
-                            <td>
-                                <div class="btn-group">
-                                    <button class="btn btn-sm btn-warning" onclick="updateStock(@item.Id)">
-                                        <i class="fas fa-edit"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-info" onclick="viewHistory(@item.Id)">
-                                        <i class="fas fa-history"></i>
-                                    </button>
-                                </div>
-                            </td>
+                            <th>Name</th>
+                            <th class="text-center">Quantity</th>
+                            <th class="text-end">Price</th>
+                            <th class="text-center">Min Quantity</th>
+                            <th>Status</th>
+                            <th>Last Restocked</th>
+                            <th>Actions</th>
                         </tr>
-                    }
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in Model)
+                        {
+                            <tr>
+                                <td>@item.Name</td>
+                                <td class="text-center">@item.Quantity</td>
+                                <td class="text-end">@item.Price.ToString("C")</td>
+                                <td class="text-center">@item.MinimumQuantity</td>
+                                <td>
+                                    <span class="badge @(item.IsLowStock ? "bg-danger" : "bg-success")">
+                                        @(item.IsLowStock ? "Low Stock" : "In Stock")
+                                    </span>
+                                </td>
+                                <td>@item.LastRestocked.ToString("g")</td>
+                                <td>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-warning" onclick="updateStock(@item.Id)" title="Update Stock">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-info" onclick="viewHistory(@item.Id)" title="View History">
+                                            <i class="fas fa-history"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>
@@ -114,9 +140,18 @@
         $(document).ready(function() {
             $('#inventoryTable').DataTable({
                 order: [[4, 'asc']], // Sort by status by default
-                pageLength: 25
+                pageLength: 25,
+                language: {
+                    search: "_INPUT_",
+                    searchPlaceholder: "Search inventory..."
+                }
             });
         });
+
+        function exportInventory() {
+            // Implementation for export functionality
+            alert('Export feature coming soon');
+        }
 
         async function updateStock(id) {
             $('#updateItemId').val(id);
@@ -128,7 +163,7 @@
             alert('Stock history for item ID: ' + id);
         }
 
-        // Add form submission handler
+        // Form handlers
         $('#addInventoryForm').on('submit', async function(e) {
             e.preventDefault();
             try {
@@ -141,14 +176,21 @@
                 if (response.ok) {
                     location.reload();
                 } else {
-                    alert('Failed to add item');
+                    Swal.fire({
+                        title: 'Error',
+                        text: 'Failed to add item',
+                        icon: 'error'
+                    });
                 }
             } catch (error) {
-                alert('Error: ' + error);
+                Swal.fire({
+                    title: 'Error',
+                    text: error.message,
+                    icon: 'error'
+                });
             }
         });
 
-        // Update stock form submission handler
         $('#updateStockForm').on('submit', async function(e) {
             e.preventDefault();
             try {
@@ -161,29 +203,82 @@
                 if (response.ok) {
                     location.reload();
                 } else {
-                    alert('Failed to update stock');
+                    Swal.fire({
+                        title: 'Error',
+                        text: 'Failed to update stock',
+                        icon: 'error'
+                    });
                 }
             } catch (error) {
-                alert('Error: ' + error);
+                Swal.fire({
+                    title: 'Error',
+                    text: error.message,
+                    icon: 'error'
+                });
             }
         });
 
-        // Show success/error messages
+        // Success/Error messages using SweetAlert2
         @if (TempData["Success"] != null)
         {
             <text>
-                    $(document).ready(function() {
-                        alert('@TempData["Success"]');
+                    Swal.fire({
+                        title: 'Success',
+                        text: '@TempData["Success"]',
+                        icon: 'success'
                     });
             </text>
         }
         @if (TempData["Error"] != null)
         {
             <text>
-                    $(document).ready(function() {
-                        alert('@TempData["Error"]');
+                    Swal.fire({
+                        title: 'Error',
+                        text: '@TempData["Error"]',
+                        icon: 'error'
                     });
             </text>
         }
     </script>
+
+    <style>
+        .border-left-primary {
+            border-left: 4px solid #4e73df;
+        }
+
+        .border-left-success {
+            border-left: 4px solid #1cc88a;
+        }
+
+        .border-left-warning {
+            border-left: 4px solid #f6c23e;
+        }
+
+        .text-gray-300 {
+            color: #dddfeb !important;
+        }
+
+        .text-gray-800 {
+            color: #5a5c69 !important;
+        }
+
+        .shadow {
+            box-shadow: 0 .15rem 1.75rem 0 rgba(58,59,69,.15) !important;
+        }
+
+        .table > thead > tr > th {
+            background-color: #f8f9fc;
+            border-bottom: 2px solid #e3e6f0;
+        }
+
+        .dataTables_filter input {
+            border-radius: 4px;
+            border: 1px solid #e3e6f0;
+            padding: 6px 12px;
+        }
+
+        .btn-group .btn {
+            box-shadow: none !important;
+        }
+    </style>
 }
