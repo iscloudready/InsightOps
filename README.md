@@ -4,13 +4,17 @@
 
 # InsightOps
 
-![Build Status](https://github.com/iscloudready/InsightOps/actions/workflows/main.yml/badge.svg)
+![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/iscloudready/InsightOps/main.yml?branch=main)
 ![GitHub Issues](https://img.shields.io/github/issues/iscloudready/InsightOps)
 ![GitHub Pull Requests](https://img.shields.io/github/issues-pr/iscloudready/InsightOps)
+![GitHub License](https://img.shields.io/github/license/iscloudready/InsightOps)
+![GitHub Contributors](https://img.shields.io/github/contributors/iscloudready/InsightOps)
+![GitHub Last Commit](https://img.shields.io/github/last-commit/iscloudready/InsightOps)
+
+![Build Status](https://github.com/iscloudready/InsightOps/actions/workflows/main.yml/badge.svg)
 ![Contributors](https://img.shields.io/github/contributors/iscloudready/InsightOps)
 ![Coverage](https://codecov.io/gh/iscloudready/InsightOps/branch/main/graph/badge.svg)
 ![Last Commit](https://img.shields.io/github/last-commit/iscloudready/InsightOps)
-![License](https://img.shields.io/github/license/iscloudready/InsightOps)
 
 ## Quick Start
 ```powershell
