@@ -1,0 +1,258 @@
+﻿@{
+    ViewData["Title"] = "Operations Dashboard";
+}
+
+<div class="container-fluid p-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="h3 mb-0 text-gray-800">Operations Control Center</h1>
+            <p class="text-muted">Real-time System Monitoring & Management</p>
+        </div>
+        <div>
+            <button class="btn btn-primary" data-refresh>
+                <i class="fas fa-sync-alt"></i> Refresh Dashboard
+            </button>
+        </div>
+    </div>
+
+    <div id="alertContainer" class="mb-4"></div>
+
+    <!-- Summary Cards -->
+    <div class="row g-4 mb-4">
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow h-100">
+                <div class="card-body border-left-primary">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-primary text-uppercase mb-1">Active Orders</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800" id="activeOrdersCount">0</div>
+                            <div class="text-muted small" id="ordersTrend"></div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-shopping-cart fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow h-100">
+                <div class="card-body border-left-success">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-success text-uppercase mb-1">Inventory Items</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800" id="inventoryCount">0</div>
+                            <div class="text-danger small" id="lowStockAlert"></div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-warehouse fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow h-100">
+                <div class="card-body border-left-info">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-info text-uppercase mb-1">System Health</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800" id="systemHealth">-</div>
+                            <div class="text-muted small" id="healthDetails"></div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-heartbeat fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6">
+            <div class="card shadow h-100">
+                <div class="card-body border-left-warning">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <div class="text-xs fw-bold text-warning text-uppercase mb-1">Response Time</div>
+                            <div class="h5 mb-0 fw-bold text-gray-800" id="responseTime">0ms</div>
+                            <div class="text-muted small" id="requestRate"></div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-tachometer-alt fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="row">
+        <!-- Service Status -->
+        <div class="col-xl-8">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3 d-flex justify-content-between align-items-center">
+                    <h6 class="m-0 fw-bold text-primary">
+                        <i class="fas fa-server me-1"></i>
+                        Microservices Status
+                    </h6>
+                    <div id="lastUpdated" class="text-muted small"></div>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle" id="servicesTable">
+                            <thead>
+                                <tr>
+                                    <th>Service</th>
+                                    <th>Status</th>
+                                    <th>Uptime</th>
+                                    <th>Last Updated</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr id="orderserviceRow">
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-shopping-cart me-2 text-primary"></i>
+                                            Order Service
+                                        </div>
+                                    </td>
+                                    <td><span class="badge bg-secondary">Unknown</span></td>
+                                    <td>-</td>
+                                    <td>-</td>
+                                </tr>
+                                <tr id="inventoryserviceRow">
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-box me-2 text-success"></i>
+                                            Inventory Service
+                                        </div>
+                                    </td>
+                                    <td><span class="badge bg-secondary">Unknown</span></td>
+                                    <td>-</td>
+                                    <td>-</td>
+                                </tr>
+                                <tr id="frontendserviceRow">
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-desktop me-2 text-info"></i>
+                                            Frontend Service
+                                        </div>
+                                    </td>
+                                    <td><span class="badge bg-secondary">Unknown</span></td>
+                                    <td>-</td>
+                                    <td>-</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Docker Status Card -->
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 fw-bold text-primary">
+                        <i class="fab fa-docker me-1"></i>
+                        Docker Status
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="row g-4">
+                        <div class="col-md-6">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <span class="fw-bold">Active Containers</span>
+                                <span id="activeContainers" class="badge bg-success">0/0</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <span class="fw-bold">Container CPU Usage</span>
+                                <span id="containerCpuUsage" class="badge bg-primary">0%</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <span class="fw-bold">Container Memory</span>
+                                <span id="containerMemoryUsage" class="badge bg-info">0 MB</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="fw-bold">Network I/O</span>
+                                <span id="networkIO" class="badge bg-warning">0 KB/s</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Resources -->
+        <div class="col-xl-4">
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 fw-bold text-primary">
+                        <i class="fas fa-microchip me-1"></i>
+                        System Resources
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="fw-bold">CPU Usage</span>
+                            <span id="cpuUsageText" class="badge bg-primary">0%</span>
+                        </div>
+                        <div class="progress" style="height: 10px;">
+                            <div class="progress-bar" role="progressbar" id="cpuUsage" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="fw-bold">Memory Usage</span>
+                            <span id="memoryUsageText" class="badge bg-info">0%</span>
+                        </div>
+                        <div class="progress" style="height: 10px;">
+                            <div class="progress-bar bg-info" role="progressbar" id="memoryUsage" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="fw-bold">Storage Usage</span>
+                            <span id="storageUsageText" class="badge bg-warning">0%</span>
+                        </div>
+                        <div class="progress" style="height: 10px;">
+                            <div class="progress-bar bg-warning" role="progressbar" id="storageUsage" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Health Summary -->
+            <div class="card shadow">
+                <div class="card-header py-3">
+                    <h6 class="m-0 fw-bold text-primary">
+                        <i class="fas fa-chart-line me-1"></i>
+                        Health Summary
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <div id="healthSummary">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <span class="fw-bold">Total Services</span>
+                            <span id="totalServices" class="badge bg-primary">3</span>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <span class="fw-bold">Healthy Services</span>
+                            <span id="healthyServices" class="badge bg-success">0</span>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="fw-bold">System Uptime</span>
+                            <span id="systemUptime" class="badge bg-info">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

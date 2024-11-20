@@ -95,7 +95,10 @@
         <div class="col-xl-8">
             <div class="card shadow mb-4">
                 <div class="card-header py-3 d-flex justify-content-between align-items-center">
-                    <h6 class="m-0 fw-bold text-primary">Microservices Status</h6>
+                    <h6 class="m-0 fw-bold text-primary">
+                        <i class="fas fa-server me-1"></i>
+                        Microservices Status
+                    </h6>
                     <div id="lastUpdated" class="text-muted small"></div>
                 </div>
                 <div class="card-body">
@@ -122,13 +125,23 @@
                                     <td>-</td>
                                 </tr>
                                 <tr id="inventoryserviceRow">
-                                    <td>Inventory Service</td>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-box me-2 text-success"></i>
+                                            Inventory Service
+                                        </div>
+                                    </td>
                                     <td><span class="badge bg-secondary">Unknown</span></td>
                                     <td>-</td>
                                     <td>-</td>
                                 </tr>
                                 <tr id="frontendserviceRow">
-                                    <td>Frontend Service</td>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-desktop me-2 text-info"></i>
+                                            Frontend Service
+                                        </div>
+                                    </td>
                                     <td><span class="badge bg-secondary">Unknown</span></td>
                                     <td>-</td>
                                     <td>-</td>
@@ -143,13 +156,16 @@
         <div class="col-xl-4">
             <div class="card shadow mb-4">
                 <div class="card-header py-3">
-                    <h6 class="m-0 fw-bold text-primary">System Resources</h6>
+                    <h6 class="m-0 fw-bold text-primary">
+                        <i class="fas fa-microchip me-1"></i>
+                        System Resources
+                    </h6>
                 </div>
                 <div class="card-body">
                     <div class="mb-4">
                         <div class="d-flex justify-content-between mb-1">
-                            <span>CPU Usage</span>
-                            <span id="cpuUsageText">0%</span>
+                            <span class="fw-bold">CPU Usage</span>
+                            <span id="cpuUsageText" class="badge bg-primary">0%</span>
                         </div>
                         <div class="progress" style="height: 10px;">
                             <div class="progress-bar" role="progressbar" id="cpuUsage" style="width: 0%"></div>
@@ -158,8 +174,8 @@
 
                     <div class="mb-4">
                         <div class="d-flex justify-content-between mb-1">
-                            <span>Memory Usage</span>
-                            <span id="memoryUsageText">0%</span>
+                            <span class="fw-bold">Memory Usage</span>
+                            <span id="memoryUsageText" class="badge bg-info">0%</span>
                         </div>
                         <div class="progress" style="height: 10px;">
                             <div class="progress-bar bg-info" role="progressbar" id="memoryUsage" style="width: 0%"></div>
@@ -168,8 +184,8 @@
 
                     <div>
                         <div class="d-flex justify-content-between mb-1">
-                            <span>Storage Usage</span>
-                            <span id="storageUsageText">0%</span>
+                            <span class="fw-bold">Storage Usage</span>
+                            <span id="storageUsageText" class="badge bg-warning">0%</span>
                         </div>
                         <div class="progress" style="height: 10px;">
                             <div class="progress-bar bg-warning" role="progressbar" id="storageUsage" style="width: 0%"></div>
@@ -183,7 +199,10 @@
         <div class="col-xl-8">
             <div class="card shadow mb-4">
                 <div class="card-header py-3 d-flex justify-content-between align-items-center">
-                    <h6 class="m-0 fw-bold text-primary">Docker Container Status</h6>
+                    <h6 class="m-0 fw-bold text-primary">
+                        <i class="fab fa-docker me-1"></i>
+                        Docker Status
+                    </h6>
                 </div>
                 <div class="card-body">
                     <div class="table-responsive">
@@ -251,6 +270,7 @@
                     </div>
                 </div>
 
+            </div>
         </div>
     </div>
 </div>
