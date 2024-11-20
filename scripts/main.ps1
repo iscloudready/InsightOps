@@ -6,7 +6,7 @@ $script:BASE_PATH = $PSScriptRoot
 $script:MODULE_PATH = Join-Path $BASE_PATH "Modules"
 $env:CONFIG_PATH = $script:CONFIG_PATH
 # In main.ps1, add:
-Import-Module (Join-Path $script:MODULE_PATH "Monitoring.psm1") -Force
+#Import-Module (Join-Path $script:MODULE_PATH "Monitoring.psm1") -Force
 
 # Helper function to check prerequisites before starting services
 function Test-Prerequisites {

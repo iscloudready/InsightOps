@@ -7,7 +7,7 @@ if (-not (Get-Module Core)) {
 }
 
 # Add to existing EnvironmentSetup.psm1
-Import-Module (Join-Path $PSScriptRoot "Monitoring.psm1")
+#Import-Module (Join-Path $PSScriptRoot "Monitoring.psm1")
 
 # Import paths and settings from Core module
 $script:CONFIG_PATH = (Get-Variable -Name CONFIG_PATH -Scope Global).Value
