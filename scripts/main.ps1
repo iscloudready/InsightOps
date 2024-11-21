@@ -108,9 +108,9 @@ function Import-ModuleSafely {
 
 function Show-Menu {
     Clear-Host
-    Write-Host "`n╔════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "║    InsightOps Management Console    ║" -ForegroundColor Cyan
-    Write-Host "╚════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host "`n=========================================" -ForegroundColor Cyan
+    Write-Host "       InsightOps Management Console      " -ForegroundColor Cyan
+    Write-Host "=========================================" -ForegroundColor Cyan
 
     # System Setup & Prerequisites
     Write-Host "`n[Setup and Prerequisites]" -ForegroundColor Yellow
@@ -166,27 +166,36 @@ function Show-Menu {
     Write-Host "`n[System Control]" -ForegroundColor Yellow
     Write-Host " 0.  Exit" -ForegroundColor Red
 
-    Write-Host "`n╔════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "║    Current Environment: $(if ($env:ASPNETCORE_ENVIRONMENT) { $env:ASPNETCORE_ENVIRONMENT } else { 'Development' })    ║" -ForegroundColor Cyan
-    Write-Host "╚════════════════════════════════════╝" -ForegroundColor Cyan
+    # Environment and Status
+    Write-Host "`n=========================================" -ForegroundColor Cyan
+    $env = if ($env:ASPNETCORE_ENVIRONMENT) { $env:ASPNETCORE_ENVIRONMENT } else { 'Development' }
+    Write-Host "Current Environment: $env" -ForegroundColor Cyan
+    Write-Host "=========================================" -ForegroundColor Cyan
 
-    # Show service status summary if services are running
+    # Show service status if running
     if (Test-DockerEnvironment) {
         try {
-            $runningContainers = (docker ps -q).Count
-            $totalContainers = (docker ps -aq).Count
-            $healthyContainers = (docker ps --format "{{.Status}}" | Select-String "healthy").Count
+            $runningContainers = @(docker ps -q).Count
+            $totalContainers = @(docker ps -aq).Count
+            $healthyContainers = @(docker ps --format "{{.Status}}" | Select-String "healthy").Count
             
             Write-Host "`nService Status Summary:" -ForegroundColor Magenta
-            Write-Host " • Running: $runningContainers/$totalContainers containers" -ForegroundColor $(if ($runningContainers -eq $totalContainers) { "Green" } else { "Yellow" })
-            Write-Host " • Healthy: $healthyContainers/$runningContainers containers" -ForegroundColor $(if ($healthyContainers -eq $runningContainers) { "Green" } else { "Yellow" })
+            Write-Host "*  Running: $runningContainers/$totalContainers containers" -ForegroundColor $(if ($runningContainers -eq $totalContainers) { "Green" } else { "Yellow" })
+            Write-Host "*  Healthy: $healthyContainers/$runningContainers containers" -ForegroundColor $(if ($healthyContainers -eq $runningContainers) { "Green" } else { "Yellow" })
             
-            # Show resource usage summary
-            $cpuUsage = docker stats --no-stream --format "{{.CPUPerc}}" | ForEach-Object { $_ -replace '%', '' } | Measure-Object -Average | Select-Object -ExpandProperty Average
-            $memUsage = docker stats --no-stream --format "{{.MemPerc}}" | ForEach-Object { $_ -replace '%', '' } | Measure-Object -Average | Select-Object -ExpandProperty Average
+            # Resource usage summary
+            $cpuUsage = 0
+            $memUsage = 0
+            if ($runningContainers -gt 0) {
+                $stats = docker stats --no-stream --format "{{.CPUPerc}},{{.MemPerc}}"
+                if ($stats) {
+                    $cpuUsage = ($stats | ForEach-Object { ($_ -split ',')[0] -replace '[^0-9.]','' } | Measure-Object -Average).Average
+                    $memUsage = ($stats | ForEach-Object { ($_ -split ',')[1] -replace '[^0-9.]','' } | Measure-Object -Average).Average
+                }
+            }
             
-            Write-Host " • CPU Usage: $([math]::Round($cpuUsage, 2))%" -ForegroundColor $(if ($cpuUsage -lt 80) { "Green" } else { "Red" })
-            Write-Host " • Memory Usage: $([math]::Round($memUsage, 2))%" -ForegroundColor $(if ($memUsage -lt 80) { "Green" } else { "Red" })
+            Write-Host "*  CPU Usage: $([math]::Round($cpuUsage, 2))%" -ForegroundColor $(if ($cpuUsage -lt 80) { "Green" } else { "Red" })
+            Write-Host "*  Memory Usage: $([math]::Round($memUsage, 2))%" -ForegroundColor $(if ($memUsage -lt 80) { "Green" } else { "Red" })
         }
         catch {
             Write-Host "`nUnable to fetch service status: $_" -ForegroundColor Red
@@ -196,6 +205,7 @@ function Show-Menu {
     # Last update time
     Write-Host "`nLast Updated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Gray
     Write-Host "Type 'help <number>' for detailed information about a command" -ForegroundColor Gray
+    Write-Host "`nEnter your choice (0-29): " -ForegroundColor Yellow -NoNewline
 }
 
 # Helper function for command help

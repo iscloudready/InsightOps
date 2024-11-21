@@ -1173,21 +1173,70 @@ function Set-GrafanaPermissions {
     
     foreach ($path in $paths) {
         if (Test-Path $path) {
-            # Set directory permissions
-            $acl = Get-Acl $path
-            $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-                "Everyone", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
-            )
-            $acl.SetAccessRule($accessRule)
-            Set-Acl -Path $path -AclObject $acl
-            Write-Host "Set permissions for: $path" -ForegroundColor Green
-            
-            # Set file permissions
-            Get-ChildItem -Path $path -Recurse -File | ForEach-Object {
-                $acl = Get-Acl $_.FullName
-                $acl.SetAccessRule($accessRule)
-                Set-Acl -Path $_.FullName -AclObject $acl
-                Write-Host "Set permissions for: $($_.FullName)" -ForegroundColor Green
+            try {
+                # Set directory permissions
+                $acl = Get-Acl $path
+                $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    "Everyone", 
+                    [System.Security.AccessControl.FileSystemRights]::FullControl,
+                    [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit,
+                    [System.Security.AccessControl.PropagationFlags]::None,
+                    [System.Security.AccessControl.AccessControlType]::Allow
+                )
+                $acl.AddAccessRule($accessRule)
+                Set-Acl -Path $path -AclObject $acl
+                Write-Host "Set permissions for: $path" -ForegroundColor Green
+                
+                # Set file permissions
+                Get-ChildItem -Path $path -Recurse -File | ForEach-Object {
+                    $fileAcl = Get-Acl $_.FullName
+                    $fileAcl.AddAccessRule($accessRule)
+                    Set-Acl -Path $_.FullName -AclObject $fileAcl
+                    Write-Host "Set permissions for: $($_.FullName)" -ForegroundColor Green
+                }
+            } catch {
+                Write-Error "Failed to set permissions for: $path. Error: $_"
+            }
+        }
+    }
+}
+
+function _Set-GrafanaPermissions {
+    param(
+        [string]$ConfigPath = $script:CONFIG_PATH
+    )
+    
+    $grafanaPath = Join-Path $ConfigPath "grafana"
+    $paths = @(
+        (Join-Path $grafanaPath "dashboards"),
+        (Join-Path $grafanaPath "provisioning")
+    )
+    
+    foreach ($path in $paths) {
+        if (Test-Path $path) {
+            try {
+                # Set directory permissions
+                $acl = Get-Acl $path
+                $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    "Everyone", 
+                    "FullControl",
+                    [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit,
+                    [System.Security.AccessControl.PropagationFlags]::None,
+                    [System.Security.AccessControl.AccessControlType]::Allow
+                )
+                $acl.AddAccessRule($accessRule)
+                Set-Acl -Path $path -AclObject $acl
+                Write-Host "Set permissions for: $path" -ForegroundColor Green
+                
+                # Set file permissions
+                Get-ChildItem -Path $path -Recurse -File | ForEach-Object {
+                    $acl = Get-Acl $_.FullName
+                    $acl.AddAccessRule($accessRule)
+                    Set-Acl -Path $_.FullName -AclObject $acl
+                    Write-Host "Set permissions for: $($_.FullName)" -ForegroundColor Green
+                }
+            } catch {
+                Write-Error "Failed to set permissions for: $path. Error: $_"
             }
         }
     }
