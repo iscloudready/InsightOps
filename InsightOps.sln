@@ -58,7 +58,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SharedModels", "SharedModels\SharedModels.csproj", "{526A0556-B783-465B-9082-2C92FD618980}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InsightOps.Observability", "InsightOps.Observability\InsightOps.Observability.csproj", "{F9B5326D-D8C1-4372-AF56-797A6EA28D4B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Observability", "InsightOps.Observability\Observability.csproj", "{F9B5326D-D8C1-4372-AF56-797A6EA28D4B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

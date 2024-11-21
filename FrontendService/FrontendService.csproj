@@ -46,7 +46,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <ProjectReference Include="..\InsightOps.Observability\InsightOps.Observability.csproj" />
+	  <ProjectReference Include="..\InsightOps.Observability\Observability.csproj" />
 	</ItemGroup>
 
 </Project>
