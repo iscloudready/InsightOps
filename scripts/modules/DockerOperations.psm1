@@ -1045,37 +1045,61 @@ function Rebuild-DockerService {
     param (
         [string]$ServiceName = $null
     )
-    
+
     try {
         # Verify Docker Compose file
+        Write-Host "Verifying Docker Compose file..." -ForegroundColor Yellow
         if (-not $script:DOCKER_COMPOSE_PATH) {
             $script:DOCKER_COMPOSE_PATH = Join-Path $env:CONFIG_PATH "docker-compose.yml"
             if (-not (Test-Path $script:DOCKER_COMPOSE_PATH)) {
-                throw "Docker Compose configuration not found at: $script:DOCKER_COMPOSE_PATH"
+                Write-Error "Docker Compose configuration not found at: $script:DOCKER_COMPOSE_PATH"
+                throw "Docker Compose configuration not found"
+            } else {
+                Write-Host "Docker Compose file found: $script:DOCKER_COMPOSE_PATH" -ForegroundColor Green
             }
         }
 
+        # Validate Docker Compose file
+        $validationCmd = "docker-compose -f $script:DOCKER_COMPOSE_PATH config"
+        $validationResult = Invoke-Expression $validationCmd
+        if ($LASTEXITCODE -ne 0) {
+            throw "Docker Compose validation failed. Logs: $validationResult"
+        }
+
         # Setup environment variables
+        Write-Host "Setting up environment variables..." -ForegroundColor Yellow
         $env:NAMESPACE = if ([string]::IsNullOrEmpty($env:NAMESPACE)) { "insightops" } else { $env:NAMESPACE }
+        Write-Host "Namespace set to: $env:NAMESPACE" -ForegroundColor Cyan
 
         # Create keys directory with proper permissions
+        Write-Host "Creating keys directory..." -ForegroundColor Yellow
         $keysPath = Join-Path $env:CONFIG_PATH "keys"
         if (-not (Test-Path $keysPath)) {
-            Write-Host "Creating keys directory: $keysPath" -ForegroundColor Yellow
             New-Item -ItemType Directory -Path $keysPath -Force | Out-Null
-            Write-Host "✓ Created keys directory" -ForegroundColor Green
+            Write-Host "Keys directory created: $keysPath" -ForegroundColor Green
+        } else {
+            Write-Host "Keys directory already exists: $keysPath" -ForegroundColor Cyan
         }
 
         # Stop any existing containers
         Write-Host "Stopping existing containers..." -ForegroundColor Yellow
-        if ($ServiceName) {
-            if (docker ps --filter "name=$ServiceName" --format "{{.Names}}" | Select-String -Pattern $ServiceName) {
-                docker-compose -f $script:DOCKER_COMPOSE_PATH stop $ServiceName
+        try {
+            if ($ServiceName) {
+                if (docker ps --filter "name=$ServiceName" --format "{{.Names}}" | Select-String -Pattern $ServiceName) {
+                    $stopCmd = "docker-compose -f $script:DOCKER_COMPOSE_PATH stop $ServiceName"
+                    Write-Host "Executing: $stopCmd" -ForegroundColor Yellow
+                    Invoke-Expression $stopCmd
+                } else {
+                    Write-Warning "Service $ServiceName is not running. Skipping stop."
+                }
             } else {
-                Write-Warning "Service $ServiceName is not running. Skipping stop."
+                $stopCmd = "docker-compose -f $script:DOCKER_COMPOSE_PATH down --volumes --remove-orphans"
+                Write-Host "Executing: $stopCmd" -ForegroundColor Yellow
+                Invoke-Expression $stopCmd
             }
-        } else {
-            docker-compose -f $script:DOCKER_COMPOSE_PATH down
+        } catch {
+            Write-Error "Failed to stop existing containers: $_"
+            $_ | Format-List -Force
         }
 
         # Reset database
@@ -1083,20 +1107,24 @@ function Rebuild-DockerService {
         try {
             if (docker ps --filter "name=insightops_db" --format "{{.Names}}" | Select-String -Pattern "insightops_db") {
                 Start-Sleep -Seconds 5
-                docker exec insightops_db psql -U insightops_user -d postgres -c "
-                    SELECT pg_terminate_backend(pid) 
-                    FROM pg_stat_activity 
-                    WHERE datname = 'insightops_db';
-                    DROP DATABASE IF EXISTS insightops_db;
-                    CREATE DATABASE insightops_db;
-                "
+                $resetCmd = @"
+docker exec insightops_db psql -U insightops_user -d postgres -c "
+    SELECT pg_terminate_backend(pid)
+    FROM pg_stat_activity
+    WHERE datname = 'insightops_db';
+    DROP DATABASE IF EXISTS insightops_db;
+    CREATE DATABASE insightops_db;
+"
+"@
+                Write-Host "Executing: $resetCmd" -ForegroundColor Yellow
+                Invoke-Expression $resetCmd
                 Write-Host "Database reset successful" -ForegroundColor Green
             } else {
                 Write-Warning "Database container 'insightops_db' not found. Skipping database reset."
             }
         } catch {
-            Write-Warning "Failed to reset database: $_"
-            # Continue anyway as the database might not exist yet
+            Write-Error "Failed to reset database: $_"
+            $_ | Format-List -Force
         }
 
         # Reinitialize Grafana dashboards
@@ -1104,64 +1132,68 @@ function Rebuild-DockerService {
         try {
             Initialize-GrafanaDashboards
         } catch {
-            Write-Warning "Failed to initialize Grafana dashboards: $_"
+            Write-Error "Failed to initialize Grafana dashboards: $_"
+            $_ | Format-List -Force
         }
 
-        # After initializing Grafana dashboards
+        # Set permissions
         Write-Host "Setting permissions for directories..." -ForegroundColor Cyan
         try {
             Set-GrafanaPermissions
             Write-Host "Permissions successfully set." -ForegroundColor Green
         } catch {
-            Write-Warning "Error setting permissions: $_"
+            Write-Error "Error setting permissions: $_"
+            $_ | Format-List -Force
         }
 
-        # Setup volumes
+        # Setup Docker volumes
         Write-Host "Setting up Docker volumes..." -ForegroundColor Cyan
-        if (-not (Setup-DockerVolumes)) {
-            throw "Failed to setup Docker volumes"
+        try {
+            Setup-DockerVolumes
+        } catch {
+            Write-Error "Failed to setup Docker volumes: $_"
+            $_ | Format-List -Force
         }
 
         # Build and start services
         Write-Host "Building and starting services..." -ForegroundColor Cyan
-        if ($ServiceName) {
-            if (docker ps --filter "name=$ServiceName" --format "{{.Names}}" | Select-String -Pattern $ServiceName) {
-                Write-Host "Rebuilding service: $ServiceName" -ForegroundColor Yellow
-                $buildResult = docker-compose -f $script:DOCKER_COMPOSE_PATH build $ServiceName
-                if ($LASTEXITCODE -ne 0) {
-                    throw "Failed to build service $ServiceName : $buildResult"
-                }
+        try {
+            if ($ServiceName) {
+                $buildCmd = "docker-compose -f $script:DOCKER_COMPOSE_PATH build $ServiceName"
+                Write-Host "Executing: $buildCmd" -ForegroundColor Yellow
+                $buildResult = Invoke-Expression $buildCmd
+                Write-Host "$buildResult" -ForegroundColor Cyan
 
-                $upResult = docker-compose -f $script:DOCKER_COMPOSE_PATH up -d $ServiceName
-                if ($LASTEXITCODE -ne 0) {
-                    throw "Failed to start service $ServiceName : $upResult"
-                }
+                $upCmd = "docker-compose -f $script:DOCKER_COMPOSE_PATH up -d $ServiceName"
+                Write-Host "Executing: $upCmd" -ForegroundColor Yellow
+                $upResult = Invoke-Expression $upCmd
+                Write-Host "$upResult" -ForegroundColor Cyan
             } else {
-                Write-Warning "Service $ServiceName is not found in running or stopped containers."
-            }
-        } else {
-            Write-Host "Rebuilding all services" -ForegroundColor Yellow
-            $buildResult = docker-compose -f $script:DOCKER_COMPOSE_PATH build
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to build services: $buildResult"
-            }
+                $buildCmd = "docker-compose -f $script:DOCKER_COMPOSE_PATH build"
+                Write-Host "Executing: $buildCmd" -ForegroundColor Yellow
+                $buildResult = Invoke-Expression $buildCmd
+                Write-Host "$buildResult" -ForegroundColor Cyan
 
-            $upResult = docker-compose -f $script:DOCKER_COMPOSE_PATH up -d
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to start services: $upResult"
+                $upCmd = "docker-compose -f $script:DOCKER_COMPOSE_PATH up -d"
+                Write-Host "Executing: $upCmd" -ForegroundColor Yellow
+                $upResult = Invoke-Expression $upCmd
+                Write-Host "$upResult" -ForegroundColor Cyan
             }
+        } catch {
+            Write-Error "Failed to build and start services: $_"
+            $_ | Format-List -Force
         }
 
-        # Wait longer for services to initialize
+        # Wait for services to initialize
         Write-Host "Waiting for services to initialize..." -ForegroundColor Cyan
         Start-Sleep -Seconds 30
 
         # Check service health
         Write-Host "Checking service health..." -ForegroundColor Cyan
         $services = if ($ServiceName) { @($ServiceName) } else { @("frontend", "apigateway", "orderservice", "inventoryservice") }
-
         foreach ($svc in $services) {
             $containerName = "${env:NAMESPACE}_$svc"
+
             try {
                 $status = docker inspect --format='{{.State.Health.Status}}' $containerName 2>$null
                 if ($status) {
@@ -1174,46 +1206,24 @@ function Rebuild-DockerService {
                 Write-Error "Failed to inspect service $($svc). Error: $_"
                 $_ | Format-List -Force
             }
+
+            # Retrieve and save logs
+            if (docker ps -a --filter name=$containerName) {
+                Write-Host "Retrieving logs for $containerName..." -ForegroundColor Yellow
+                $dockerLogs = docker logs $containerName
+                Write-Host "$dockerLogs" -ForegroundColor Cyan
+                $logFilePath = ".\docker_logs\$containerName.log"
+                $dockerLogs | Out-File -FilePath $logFilePath
+            } else {
+                Write-Warning "Container $containerName does not exist. Skipping log retrieval."
+            }
         }
 
         Write-Host "`nService rebuild completed" -ForegroundColor Green
         return $true
-    }
-    catch {
-        $svc = $services[-1]  # Get the last service name
-        $containerName = "${env:NAMESPACE}_$svc"
-    
-        Write-Host "Container Name: $containerName" -ForegroundColor Cyan
+    } catch {
         Write-Error "Failed to rebuild services: $_"
-        Write-Error "Failed to inspect service $($svc). Error: $_"
-        Write-Error "Container $($svc) exited with code 139. Check Docker logs for details."
-    
-        # Verify container name is not empty
-        if (-not [string]::IsNullOrEmpty($containerName)) {
-            # Verify container existence before retrieving logs
-            if (docker ps -a --filter name=$containerName) {
-                Write-Host "Container $containerName exists. Retrieving logs..." -ForegroundColor Yellow
-                $dockerLogs = docker logs $containerName
-                Write-Host "$dockerLogs" -ForegroundColor Cyan
-            
-                # Create log directory if it doesn't exist
-                $logDir = ".\docker_logs"
-                if (!(Test-Path $logDir)) {
-                    New-Item -ItemType Directory -Path $logDir | Out-Null
-                }
-            
-                # Save Docker logs to file
-                $logFilePath = "$logDir\$containerName.log"
-                $dockerLogs | Out-File -FilePath $logFilePath
-            } else {
-                Write-Warning "Container $containerName not found. Cannot retrieve logs."
-            }
-        } else {
-            Write-Warning "Container name is empty. Cannot retrieve logs."
-        }
-    
         $_ | Format-List -Force
-        Write-Error $_.ScriptStackTrace
         return $false
     }
 }
