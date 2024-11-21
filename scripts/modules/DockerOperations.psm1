@@ -355,27 +355,106 @@ function Start-DockerServices {
     param()
     
     try {
+        Write-Host "`nInitializing Docker services..." -ForegroundColor Cyan
+
+        # 1. Check Docker environment
         if (-not (Test-DockerEnvironment)) {
-            throw "Docker environment check failed"
+            throw "Docker environment check failed. Please ensure Docker is running and properly configured."
         }
 
-        Write-Host "Starting Docker services..." -ForegroundColor Cyan
+        # 2. Check Grafana configuration
+        Write-Host "`nChecking Grafana configuration..." -ForegroundColor Cyan
+        if (-not (Test-GrafanaConfiguration)) {
+            $response = Read-Host "Grafana configuration issues detected. Continue anyway? (y/n)"
+            if ($response -ne 'y') {
+                Write-Host "Aborting service start. Please fix Grafana configuration issues." -ForegroundColor Yellow
+                return $false
+            }
+            Write-Host "Proceeding with service start despite Grafana configuration issues..." -ForegroundColor Yellow
+        }
+
+        # 3. Set environment variables
         $env:CONFIG_PATH = $script:CONFIG_PATH
-        
-        # Pull latest images
-        docker-compose -f $script:DOCKER_COMPOSE_PATH pull
+        Write-Host "Using configuration path: $script:CONFIG_PATH" -ForegroundColor Cyan
 
-        # Build and start services
-        docker-compose -f $script:DOCKER_COMPOSE_PATH up -d --build --remove-orphans
+        # 4. Verify docker-compose file
+        if (-not (Test-Path $script:DOCKER_COMPOSE_PATH)) {
+            throw "Docker Compose file not found at: $script:DOCKER_COMPOSE_PATH"
+        }
 
-        Write-Host "Services started successfully" -ForegroundColor Green
-        docker-compose -f $script:DOCKER_COMPOSE_PATH ps
+        # 5. Pull latest images
+        Write-Host "`nPulling latest Docker images..." -ForegroundColor Cyan
+        $pullResult = docker-compose -f $script:DOCKER_COMPOSE_PATH pull
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Some images failed to pull. Continuing with existing images..."
+        }
+
+        # 6. Build and start services
+        Write-Host "`nBuilding and starting services..." -ForegroundColor Cyan
+        $startResult = docker-compose -f $script:DOCKER_COMPOSE_PATH up -d --build --remove-orphans
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to start services. Check docker-compose output for details."
+        }
+
+        # 7. Verify service status
+        Write-Host "`nVerifying service status..." -ForegroundColor Cyan
+        $services = docker-compose -f $script:DOCKER_COMPOSE_PATH ps
+        Write-Host $services
+
+        # 8. Additional health checks
+        Write-Host "`nPerforming health checks..." -ForegroundColor Cyan
+        $unhealthyServices = docker ps --format "{{.Names}}: {{.Status}}" | Where-Object { $_ -match "unhealthy" }
+        if ($unhealthyServices) {
+            Write-Warning "Some services are reporting unhealthy status:"
+            $unhealthyServices | ForEach-Object { Write-Warning $_ }
+        }
+
+        # 9. Final status report
+        Write-Host "`nService Startup Summary:" -ForegroundColor Cyan
+        Write-Host "------------------------" -ForegroundColor Cyan
+        Write-Host "✓ Docker environment verified" -ForegroundColor Green
+        Write-Host "✓ Services built and started" -ForegroundColor Green
         
+        if ($unhealthyServices) {
+            Write-Host "! Some services are unhealthy" -ForegroundColor Yellow
+            Write-Host "  Run 'Test-ServiceHealth' for detailed status" -ForegroundColor Yellow
+        } else {
+            Write-Host "✓ All services reporting healthy" -ForegroundColor Green
+        }
+
+        # 10. Provide next steps
+        Write-Host "`nNext Steps:" -ForegroundColor Cyan
+        Write-Host "1. Check service health: Option 10" -ForegroundColor Yellow
+        Write-Host "2. View logs: Option 15" -ForegroundColor Yellow
+        Write-Host "3. Access dashboards: Option 20" -ForegroundColor Yellow
+
         return $true
     }
     catch {
         Write-Error "Failed to start services: $_"
+        Write-Host "`nTroubleshooting Steps:" -ForegroundColor Yellow
+        Write-Host "1. Check Docker daemon status" -ForegroundColor Yellow
+        Write-Host "2. Verify configuration in $script:CONFIG_PATH" -ForegroundColor Yellow
+        Write-Host "3. Check service logs for specific errors" -ForegroundColor Yellow
+        Write-Host "4. Ensure all required ports are available" -ForegroundColor Yellow
+        
+        # Cleanup on failure
+        Write-Host "`nAttempting cleanup..." -ForegroundColor Cyan
+        try {
+            docker-compose -f $script:DOCKER_COMPOSE_PATH down
+            Write-Host "Cleanup successful" -ForegroundColor Green
+        }
+        catch {
+            Write-Warning "Cleanup failed: $_"
+        }
+        
         return $false
+    }
+    finally {
+        # Reset environment variables
+        if ($env:CONFIG_PATH) {
+            Remove-Item Env:\CONFIG_PATH -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -724,11 +803,12 @@ function Wait-ServiceHealth {
 }
 
 function Test-GrafanaConfiguration {
+    [CmdletBinding()]
     param(
         [string]$ConfigPath = $script:CONFIG_PATH
     )
     
-    Write-Host "Checking Grafana configuration..." -ForegroundColor Cyan
+    Write-Host "`nChecking Grafana configuration..." -ForegroundColor Cyan
     
     # Check required paths
     $paths = @(
@@ -774,6 +854,14 @@ function Test-GrafanaConfiguration {
     } else {
         Write-Host "✗ No dashboard JSON files found" -ForegroundColor Yellow
         $allValid = $false
+    }
+
+    if (-not $allValid) {
+        Write-Host "`nRecommended fixes:" -ForegroundColor Yellow
+        Write-Host "1. Ensure proper folder structure in $ConfigPath/grafana/" -ForegroundColor Yellow
+        Write-Host "2. Verify dashboards.yaml configuration" -ForegroundColor Yellow
+        Write-Host "3. Check dashboard JSON files exist" -ForegroundColor Yellow
+        Write-Host "4. Run Initialize-Environment to recreate missing components" -ForegroundColor Yellow
     }
     
     return $allValid
@@ -1362,5 +1450,6 @@ Export-ModuleMember -Function @(
     'Test-DirectoryStructure',
     'Reset-Database',
     'Set-GrafanaPermissions',
-    'Test-DashboardJson'
+    'Test-DashboardJson',
+    'Test-GrafanaConfiguration'
 )
