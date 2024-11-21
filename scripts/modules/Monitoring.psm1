@@ -316,3 +316,13 @@ function Get-ApiGatewayDashboard {
 }
 '@
 }
+
+Export-ModuleMember -Function @(
+    'Initialize-Monitoring',
+    'Get-ApiGatewayDashboard', 
+    'Get-SecurityDashboard',
+    'Get-ServiceHealthDashboard',
+    'Get-FrontendRealtimeDashboard',
+    'Get-OrdersRealtimeDashboard',
+    'Get-InventoryRealtimeDashboard'
+)

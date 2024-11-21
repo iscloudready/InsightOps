@@ -1,0 +1,40 @@
+﻿    {
+  "title": "Inventory Real-Time",
+  "uid": "inventory-realtime",
+  "tags": ["inventory", "realtime"],
+  "refresh": "5s",
+  "panels": [
+    {
+      "title": "Stock Level Changes",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "delta(inventory_stock_level[1m])",
+          "legendFormat": "{{item}}"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+    },
+    {
+      "title": "Low Stock Alerts",
+      "type": "table",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "inventory_stock_level < inventory_reorder_point",
+          "instant": true
+        }
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "transformations": [
+        {
+          "type": "filterByValue",
+          "options": {
+            "value": 1
+          }
+        }
+      ]
+    }
+  ]
+}

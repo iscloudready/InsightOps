@@ -4,6 +4,33 @@ $script:CONFIG_PATH = (Get-Variable -Name CONFIG_PATH -Scope Global).Value
 $script:DOCKER_COMPOSE_PATH = Join-Path $script:CONFIG_PATH "docker-compose.yml"
 $script:ENV_FILE = Join-Path $script:CONFIG_PATH ".env.Development"
 
+# Check if PSScriptRoot is defined
+if (-not $PSScriptRoot) {
+    # Attempt to determine the script's path
+    if ($MyInvocation.MyCommand.Path) {
+        $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+    } elseif (Get-Location) {
+        # Fallback to the current working directory
+        $PSScriptRoot = Get-Location
+    }
+}
+$script:BASE_PATH = $PSScriptRoot
+#$script:MODULE_PATH = Join-Path $BASE_PATH "Modules"
+
+# Output paths for debugging
+Write-Host "PSScriptRoot: $PSScriptRoot"
+#Write-Host "Module Path: $script:MODULE_PATH"
+
+# Import required modules
+$monitoringModulePath = Join-Path $script:BASE_PATH "Monitoring.psm1"
+if (Test-Path $monitoringModulePath) {
+    Write-Host "Loading Monitoring module from: $monitoringModulePath" -ForegroundColor Cyan
+    Import-Module $monitoringModulePath -Force
+}
+else {
+    Write-Warning "Monitoring module not found at: $monitoringModulePath"
+}
+
 # Add to your script initialization
 $env:DOCKER_BUILDKIT = 1
 $env:COMPOSE_DOCKER_CLI_BUILD = 1
@@ -696,12 +723,81 @@ function Wait-ServiceHealth {
     }
 }
 
+function Test-GrafanaConfiguration {
+    param(
+        [string]$ConfigPath = $script:CONFIG_PATH
+    )
+    
+    Write-Host "Checking Grafana configuration..." -ForegroundColor Cyan
+    
+    # Check required paths
+    $paths = @(
+        "$ConfigPath/grafana",
+        "$ConfigPath/grafana/provisioning",
+        "$ConfigPath/grafana/provisioning/dashboards",
+        "$ConfigPath/grafana/dashboards"
+    )
+    
+    $allValid = $true
+    
+    foreach ($path in $paths) {
+        if (Test-Path $path) {
+            Write-Host "✓ Found: $path" -ForegroundColor Green
+        } else {
+            Write-Host "✗ Missing: $path" -ForegroundColor Red
+            $allValid = $false
+        }
+    }
+    
+    # Check dashboards.yaml
+    $dashboardsYaml = "$ConfigPath/grafana/provisioning/dashboards/dashboards.yaml"
+    if (Test-Path $dashboardsYaml) {
+        Write-Host "✓ Found dashboards.yaml" -ForegroundColor Green
+        
+        # Verify content
+        $content = Get-Content $dashboardsYaml -Raw
+        if ($content -match '/etc/grafana/dashboards') {
+            Write-Host "✓ Dashboard path configured correctly" -ForegroundColor Green
+        } else {
+            Write-Host "✗ Invalid dashboard path in dashboards.yaml" -ForegroundColor Red
+            $allValid = $false
+        }
+    } else {
+        Write-Host "✗ Missing dashboards.yaml" -ForegroundColor Red
+        $allValid = $false
+    }
+    
+    # Check for dashboard JSON files
+    $dashboardFiles = Get-ChildItem "$ConfigPath/grafana/dashboards" -Filter "*.json" -ErrorAction SilentlyContinue
+    if ($dashboardFiles) {
+        Write-Host "✓ Found $($dashboardFiles.Count) dashboard files" -ForegroundColor Green
+    } else {
+        Write-Host "✗ No dashboard JSON files found" -ForegroundColor Yellow
+        $allValid = $false
+    }
+    
+    return $allValid
+}
+
+function Test-DashboardJson {
+    param([string]$Path)
+    try {
+        $content = Get-Content $Path -Raw
+        $null = ConvertFrom-Json $content
+        Write-Host "✓ Valid JSON: $Path" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Error "Invalid JSON in $Path : $_"
+        return $false
+    }
+}
+
 function Initialize-GrafanaDashboards {
     [CmdletBinding()]
     param(
         [string]$ConfigPath = $script:CONFIG_PATH
     )
-
     try {
         # Create required Grafana directories
         $grafanaPath = Join-Path $ConfigPath "grafana"
@@ -711,12 +807,22 @@ function Initialize-GrafanaDashboards {
             (Join-Path $grafanaPath "provisioning/datasources"),
             (Join-Path $grafanaPath "dashboards")
         )
-
         foreach ($dir in $directories) {
             if (-not (Test-Path $dir)) {
                 New-Item -ItemType Directory -Path $dir -Force | Out-Null
                 Write-Host "Created directory: $dir" -ForegroundColor Green
             }
+        }
+
+        # Initialize monitoring dashboards
+        Write-Host "Initializing monitoring dashboards..." -ForegroundColor Cyan
+        # Check if monitoring module is available
+        if (Get-Command Initialize-Monitoring -ErrorAction SilentlyContinue) {
+            Write-Host "Initializing monitoring dashboards..." -ForegroundColor Cyan
+            Initialize-Monitoring -ConfigPath $ConfigPath
+        }
+        else {
+            Write-Warning "Monitoring module not loaded. Only creating base dashboards."
         }
 
         # Create dashboard provisioning config
@@ -735,7 +841,6 @@ providers:
       path: /etc/grafana/dashboards
       foldersFromFilesStructure: true
 '@
-
         $dashboardProvisionPath = Join-Path $grafanaPath "provisioning/dashboards/dashboards.yaml"
         Set-Content -Path $dashboardProvisionPath -Value $dashboardConfig -Encoding UTF8
 
@@ -748,26 +853,36 @@ datasources:
     access: proxy
     url: http://prometheus:9090
     isDefault: true
+    version: 1
+    editable: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: "5s"
     
   - name: Loki
     type: loki
     access: proxy
     url: http://loki:3100
+    version: 1
+    editable: true
+    jsonData:
+      maxLines: 1000
     
   - name: Tempo
     type: tempo
     access: proxy
     url: http://tempo:3200
+    version: 1
+    editable: true
     jsonData:
       httpMethod: GET
       serviceMap:
         datasourceUid: prometheus
 '@
-
         $datasourceProvisionPath = Join-Path $grafanaPath "provisioning/datasources/datasources.yaml"
         Set-Content -Path $datasourceProvisionPath -Value $datasourceConfig -Encoding UTF8
 
-        # Create a sample dashboard
+        # Create base dashboard
         $sampleDashboard = @'
 {
   "annotations": {
@@ -776,15 +891,58 @@ datasources:
   "title": "InsightOps Overview",
   "uid": "insightops-overview",
   "version": 1,
-  "panels": []
+  "panels": [],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "tags": ["insightops"],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ]
+  }
 }
 '@
-
         $dashboardPath = Join-Path $grafanaPath "dashboards/overview.json"
         Set-Content -Path $dashboardPath -Value $sampleDashboard -Encoding UTF8
 
-        Write-Host "Grafana configurations created successfully" -ForegroundColor Green
-        Write-Host "You'll need to restart Grafana for these changes to take effect" -ForegroundColor Yellow
+        # Create all monitoring dashboards
+        $dashboards = @{
+            "api-gateway.json" = Get-ApiGatewayDashboard
+            "security.json" = Get-SecurityDashboard
+            "service-health.json" = Get-ServiceHealthDashboard
+            "frontend-realtime.json" = Get-FrontendRealtimeDashboard
+            "orders-realtime.json" = Get-OrdersRealtimeDashboard
+            "inventory-realtime.json" = Get-InventoryRealtimeDashboard
+        }
+
+        foreach ($dashboard in $dashboards.GetEnumerator()) {
+            $path = Join-Path $grafanaPath "dashboards/$($dashboard.Key)"
+            Write-Host "Creating dashboard: $($dashboard.Key)" -ForegroundColor Cyan
+            Set-Content -Path $path -Value $dashboard.Value -Encoding UTF8
+        }
+
+        Write-Host "✓ Grafana configurations created successfully" -ForegroundColor Green
+        Write-Host "✓ Monitoring dashboards initialized successfully" -ForegroundColor Green
+        Write-Host "! You'll need to restart Grafana for these changes to take effect" -ForegroundColor Yellow
+
+        # Add to Initialize-GrafanaDashboards
+        $dashboardFiles = Get-ChildItem -Path (Join-Path $grafanaPath "dashboards") -Filter "*.json"
+        foreach ($file in $dashboardFiles) {
+            Test-DashboardJson $file.FullName
+        }
 
         return $true
     }
@@ -817,18 +975,44 @@ function Rebuild-DockerService {
             Write-Host "✓ Created keys directory" -ForegroundColor Green
         }
 
-        # Setup volumes
-        Write-Host "Setting up Docker volumes..." -ForegroundColor Cyan
-        if (-not (Setup-DockerVolumes)) {
-            throw "Failed to setup Docker volumes"
-        }
-
         # Stop any existing containers
         Write-Host "Stopping existing containers..." -ForegroundColor Yellow
         if ($ServiceName) {
             docker-compose -f $script:DOCKER_COMPOSE_PATH stop $ServiceName
         } else {
             docker-compose -f $script:DOCKER_COMPOSE_PATH down
+        }
+
+        # Reset database
+        Write-Host "Resetting database..." -ForegroundColor Yellow
+        try {
+            # Wait for postgres container to be ready
+            Start-Sleep -Seconds 5
+            docker exec insightops_db psql -U insightops_user -d postgres -c "
+                SELECT pg_terminate_backend(pid) 
+                FROM pg_stat_activity 
+                WHERE datname = 'insightops_db';
+                DROP DATABASE IF EXISTS insightops_db;
+                CREATE DATABASE insightops_db;
+            "
+            Write-Host "Database reset successful" -ForegroundColor Green
+        }
+        catch {
+            Write-Warning "Failed to reset database: $_"
+            # Continue anyway as the database might not exist yet
+        }
+
+        # Reinitialize Grafana dashboards
+        Write-Host "Initializing Grafana dashboards..." -ForegroundColor Cyan
+        Initialize-GrafanaDashboards
+
+        # After initializing Grafana dashboards
+        Set-GrafanaPermissions
+
+        # Setup volumes
+        Write-Host "Setting up Docker volumes..." -ForegroundColor Cyan
+        if (-not (Setup-DockerVolumes)) {
+            throw "Failed to setup Docker volumes"
         }
 
         # Build and start services
@@ -857,9 +1041,9 @@ function Rebuild-DockerService {
             }
         }
 
-        # Wait for services to start
+        # Wait longer for services to initialize
         Write-Host "Waiting for services to initialize..." -ForegroundColor Cyan
-        Start-Sleep -Seconds 10
+        Start-Sleep -Seconds 30
 
         # Check service health
         Write-Host "Checking service health..." -ForegroundColor Cyan
@@ -885,6 +1069,39 @@ function Rebuild-DockerService {
         Write-Error "Failed to rebuild services: $_"
         Write-Error $_.ScriptStackTrace
         return $false
+    }
+}
+
+function Set-GrafanaPermissions {
+    param(
+        [string]$ConfigPath = $script:CONFIG_PATH
+    )
+    
+    $grafanaPath = Join-Path $ConfigPath "grafana"
+    $paths = @(
+        (Join-Path $grafanaPath "dashboards"),
+        (Join-Path $grafanaPath "provisioning")
+    )
+    
+    foreach ($path in $paths) {
+        if (Test-Path $path) {
+            # Set directory permissions
+            $acl = Get-Acl $path
+            $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                "Everyone", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
+            )
+            $acl.SetAccessRule($accessRule)
+            Set-Acl -Path $path -AclObject $acl
+            Write-Host "Set permissions for: $path" -ForegroundColor Green
+            
+            # Set file permissions
+            Get-ChildItem -Path $path -Recurse -File | ForEach-Object {
+                $acl = Get-Acl $_.FullName
+                $acl.SetAccessRule($accessRule)
+                Set-Acl -Path $_.FullName -AclObject $acl
+                Write-Host "Set permissions for: $($_.FullName)" -ForegroundColor Green
+            }
+        }
     }
 }
 
@@ -1100,6 +1317,27 @@ function Setup-DockerVolumes {
     }
 }
 
+# In DockerOperations.psm1, add function:
+function Reset-Database {
+    try {
+        Write-Host "Resetting database..." -ForegroundColor Yellow
+        # Connect to postgres container
+        docker exec insightops_db psql -U insightops_user -d postgres -c "
+            SELECT pg_terminate_backend(pid) 
+            FROM pg_stat_activity 
+            WHERE datname = 'insightops_db';
+            DROP DATABASE IF EXISTS insightops_db;
+            CREATE DATABASE insightops_db;
+        "
+        Write-Host "Database reset successful" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Error "Failed to reset database: $_"
+        return $false
+    }
+}
+
 # Export functions
 Export-ModuleMember -Function @(
     'Setup-DockerVolumes',
@@ -1121,5 +1359,8 @@ Export-ModuleMember -Function @(
     'Test-DockerEnvironment',
     'Reset-DockerEnvironment',
     'Test-PreRebuildRequirements',
-    'Test-DirectoryStructure'
+    'Test-DirectoryStructure',
+    'Reset-Database',
+    'Set-GrafanaPermissions',
+    'Test-DashboardJson'
 )

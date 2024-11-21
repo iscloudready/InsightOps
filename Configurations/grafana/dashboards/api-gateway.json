@@ -1,0 +1,60 @@
+﻿    {
+  "title": "API Gateway Metrics",
+  "uid": "api-gateway-metrics",
+  "tags": ["api-gateway", "routing"],
+  "panels": [
+    {
+      "title": "Gateway Request Flow",
+      "type": "stat-timeline",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(gateway_requests_total[1m])) by (service)",
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "options": {
+        "showValue": "always",
+        "colWidth": 0.9
+      }
+    },
+    {
+      "title": "Route Latencies",
+      "type": "heatmap",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(gateway_route_duration_seconds_bucket[5m])",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+    },
+    {
+      "title": "Circuit Breaker Status",
+      "type": "table",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "gateway_circuit_breaker_state",
+          "instant": true
+        }
+      ],
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 8},
+      "transformations": [
+        {
+          "type": "organize",
+          "config": {
+            "indexByName": {},
+            "renameByName": {
+              "endpoint": "Endpoint",
+              "state": "State",
+              "failures": "Failures"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

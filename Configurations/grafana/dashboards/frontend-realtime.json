@@ -1,0 +1,37 @@
+﻿    {
+  "title": "Frontend Real-Time Metrics",
+  "uid": "frontend-realtime",
+  "tags": ["frontend", "realtime"],
+  "refresh": "5s",
+  "panels": [
+    {
+      "title": "Active Users",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(frontend_active_sessions)"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "options": {
+        "thresholds": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 100 },
+          { "color": "red", "value": 200 }
+        ]
+      }
+    },
+    {
+      "title": "Page Load Times",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "frontend_page_load_time_seconds{quantile=\"0.95\"}"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 16, "x": 8, "y": 0}
+    }
+  ]
+}

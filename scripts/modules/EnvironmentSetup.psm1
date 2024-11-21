@@ -372,8 +372,8 @@ services:
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/overview.json
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - ${CONFIG_PATH}/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ${CONFIG_PATH}/grafana/dashboards:/etc/grafana/dashboards:ro
     ports:
       - "${GRAFANA_PORT:-3001}:3000"
     healthcheck:
