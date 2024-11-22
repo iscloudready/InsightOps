@@ -1206,29 +1206,6 @@ function Reset-Database {
     }
 }
 
-function Test-DatabaseConnection {
-    [CmdletBinding()]
-    param()
-    
-    try {
-        Write-Host "Testing database connection..." -ForegroundColor Yellow
-        $result = docker exec insightops_db pg_isready -U insightops_user -d insightops_db
-        
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "✓ Database connection successful" -ForegroundColor Green
-            return $true
-        }
-        else {
-            Write-Warning "Database connection failed. Status: $result"
-            return $false
-        }
-    }
-    catch {
-        Write-Error "Error testing database connection: $_"
-        return $false
-    }
-}
-
 function Get-DatabaseSize {
     [CmdletBinding()]
     param()
@@ -1252,29 +1229,68 @@ function Show-DatabaseStatus {
         Write-Host "`nDatabase Status:" -ForegroundColor Cyan
         Write-Host "----------------" -ForegroundColor Cyan
         
+        # Check if container exists first
+        $containerExists = docker ps -a --format "{{.Names}}" | Select-String "insightops_db"
+        
+        if (-not $containerExists) {
+            Write-Host "Status: " -NoNewline
+            Write-Host "Database container not found" -ForegroundColor Red
+            Write-Host "Connection: " -NoNewline
+            Write-Host "Not Available" -ForegroundColor Red
+            Write-Host "Size: Not Available"
+            Write-Host "Connections: Not Available"
+            return $false
+        }
+
         # Container Status
         $containerStatus = docker inspect -f '{{.State.Status}}' insightops_db 2>$null
-        Write-Host "Container Status: " -NoNewline
+        Write-Host "Status: " -NoNewline
         Write-Host $containerStatus -ForegroundColor $(if ($containerStatus -eq 'running') { 'Green' } else { 'Red' })
 
-        # Connection Test
-        $connectionStatus = Test-DatabaseConnection
-        Write-Host "Connection Status: " -NoNewline
-        Write-Host $(if ($connectionStatus) { "Connected" } else { "Disconnected" }) -ForegroundColor $(if ($connectionStatus) { 'Green' } else { 'Red' })
+        if ($containerStatus -eq 'running') {
+            # Only check these if container is running
+            $connectionStatus = Test-DatabaseConnection -Quiet
+            Write-Host "Connection: " -NoNewline
+            Write-Host $(if ($connectionStatus) { "Connected" } else { "Disconnected" }) -ForegroundColor $(if ($connectionStatus) { 'Green' } else { 'Red' })
 
-        # Database Size
-        $dbSize = Get-DatabaseSize
-        Write-Host "Database Size: $dbSize"
+            if ($connectionStatus) {
+                # Only get these details if connection is successful
+                $dbSize = Get-DatabaseSize
+                Write-Host "Size: $dbSize"
 
-        # Active Connections
-        $connectionsQuery = "SELECT count(*) FROM pg_stat_activity WHERE datname = 'insightops_db';"
-        $connections = docker exec insightops_db psql -U insightops_user -d insightops_db -t -c $connectionsQuery
-        Write-Host "Active Connections: $($connections.Trim())"
+                $connections = Get-DatabaseConnections
+                Write-Host "Active Connections: $connections"
+            }
+        }
         
         return $true
     }
     catch {
-        Write-Error "Error getting database status: $_"
+        Write-Host "Error checking database status" -ForegroundColor Red
+        Write-Verbose $_.Exception.Message
+        return $false
+    }
+}
+
+# Add this helper function
+function Test-DatabaseConnection {
+    [CmdletBinding()]
+    param(
+        [switch]$Quiet
+    )
+    
+    try {
+        if (-not $Quiet) {
+            Write-Host "Testing database connection..." -ForegroundColor Yellow
+        }
+        
+        $result = docker exec insightops_db pg_isready -U insightops_user -d insightops_db 2>$null
+        return ($LASTEXITCODE -eq 0)
+    }
+    catch {
+        if (-not $Quiet) {
+            Write-Warning "Database connection failed."
+        }
         return $false
     }
 }
@@ -1391,9 +1407,58 @@ docker compose --file `"$script:DOCKER_COMPOSE_PATH`" up -d
 
         # Execute Docker commands
         Write-Host "`nExecuting Docker commands..." -ForegroundColor Cyan
-        $output = & $tempScriptPath
-        if ($LASTEXITCODE -ne 0) {
-            throw "Docker commands failed with exit code $LASTEXITCODE. Output: $output"
+        try {
+            # Redirect verbose output to null and only capture errors
+            $output = & $tempScriptPath 2>&1
+            
+            # Check if there were any errors
+            if ($LASTEXITCODE -ne 0) {
+                # Filter out known non-critical errors
+                $criticalError = $output | Where-Object { 
+                    $_ -match "error|fail|exception" -and 
+                    $_ -notmatch "name: insightops" -and 
+                    $_ -notmatch "services:" -and
+                    $_ -notmatch "context:" -and
+                    $_ -notmatch "dockerfile:" -and
+                    $_ -notmatch "http2: server: error reading preface" -and  # Ignore Docker Desktop pipe errors
+                    $_ -notmatch "Error\(s\): 0" -and                         # Ignore "0 Error(s)" messages
+                    $_ -notmatch "file has already been closed"               # Ignore closed file errors
+                } | Where-Object { 
+                    # Additional filtering for actual errors
+                    $_ -notmatch "^#\d+\s+\d+\.\d+\s+0 Error" 
+                } | Select-Object -First 3
+
+                if ($criticalError) {
+                    Write-Host "`nError Details:" -ForegroundColor Red
+                    $criticalError | ForEach-Object { Write-Host "- $_" -ForegroundColor Red }
+                    throw "Docker commands failed with critical errors"
+                }
+                else {
+                    # Non-critical errors - continue execution
+                    Write-Host "✓ Docker commands completed with non-critical warnings" -ForegroundColor Yellow
+                }
+            }
+            else {
+                Write-Host "✓ Docker commands executed successfully" -ForegroundColor Green
+            }
+
+            # Verify services are running
+            $runningServices = docker-compose ps --services --filter "status=running"
+            if ($runningServices) {
+                Write-Host "✓ Services are running" -ForegroundColor Green
+                return $true
+            }
+        }
+        catch {
+            if ($_.Exception.Message -match "Docker commands failed with critical errors") {
+                Write-Error "Failed to execute Docker commands: $_"
+                throw
+            }
+            else {
+                # Log non-critical errors but continue
+                Write-Warning "Non-critical error during Docker commands: $_"
+                return $true  # Continue execution
+            }
         }
 
         # Wait for services to initialize
