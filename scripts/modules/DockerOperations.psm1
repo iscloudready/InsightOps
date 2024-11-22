@@ -1040,7 +1040,414 @@ datasources:
     }
 }
 
+function Test-DockerPrerequisites {
+    [CmdletBinding()]
+    param()
+    
+    try {
+        Write-Host "`nChecking Docker Prerequisites..." -ForegroundColor Cyan
+        $prerequisites = @{
+            "Docker Engine" = $false
+            "Docker Compose" = $false
+            "Docker Service" = $false
+            "Required Permissions" = $false
+        }
+
+        # Check Docker Engine
+        Write-Host "Checking Docker Engine..." -ForegroundColor Yellow
+        $dockerVersion = docker --version 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✓ Docker Engine: $dockerVersion" -ForegroundColor Green
+            $prerequisites["Docker Engine"] = $true
+        } else {
+            Write-Host "✗ Docker Engine not found or not accessible" -ForegroundColor Red
+            return $false
+        }
+
+        # Check Docker Compose
+        Write-Host "Checking Docker Compose..." -ForegroundColor Yellow
+        $composeVersion = docker compose version 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✓ Docker Compose: $composeVersion" -ForegroundColor Green
+            $prerequisites["Docker Compose"] = $true
+        } else {
+            Write-Host "✗ Docker Compose not found or not accessible" -ForegroundColor Red
+            return $false
+        }
+
+        # Check Docker Service
+        Write-Host "Checking Docker Service..." -ForegroundColor Yellow
+        $dockerInfo = docker info 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✓ Docker Service is running" -ForegroundColor Green
+            $prerequisites["Docker Service"] = $true
+        } else {
+            Write-Host "✗ Docker Service is not running" -ForegroundColor Red
+            return $false
+        }
+
+        # Check Permissions
+        Write-Host "Checking Docker Permissions..." -ForegroundColor Yellow
+        docker ps > $null 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✓ Required permissions verified" -ForegroundColor Green
+            $prerequisites["Required Permissions"] = $true
+        } else {
+            Write-Host "✗ Insufficient permissions to execute Docker commands" -ForegroundColor Red
+            return $false
+        }
+
+        # Summary
+        Write-Host "`nPrerequisites Summary:" -ForegroundColor Cyan
+        $prerequisites.GetEnumerator() | ForEach-Object {
+            $status = if ($_.Value) { "✓" } else { "✗" }
+            $color = if ($_.Value) { "Green" } else { "Red" }
+            Write-Host "$status $($_.Key)" -ForegroundColor $color
+        }
+
+        return $prerequisites.Values -notcontains $false
+    }
+    catch {
+        Write-Host "Error checking prerequisites: $_" -ForegroundColor Red
+        return $false
+    }
+}
+
+# SQL template for database reset
+$script:RESET_DATABASE_SQL = @"
+SELECT pg_terminate_backend(pid) 
+FROM pg_stat_activity 
+WHERE datname = 'insightops_db';
+DROP DATABASE IF EXISTS insightops_db;
+CREATE DATABASE insightops_db;
+\c insightops_db;
+-- Clean up any existing migration history if it exists
+DROP TABLE IF EXISTS public."__EFMigrationsHistory";
+"@
+
+function Reset-Database {
+    [CmdletBinding()]
+    param(
+        [switch]$Force
+    )
+    
+    try {
+        Write-Host "`nInitiating database reset..." -ForegroundColor Yellow
+        
+        # Safety check unless -Force is used
+        if (-not $Force) {
+            $confirmation = Read-Host "`nWARNING: This will delete all data. Are you sure? (y/n)"
+            if ($confirmation -ne 'y') {
+                Write-Host "Database reset cancelled." -ForegroundColor Yellow
+                return $false
+            }
+        }
+
+        # Create temporary SQL file
+        $tempSqlPath = Join-Path $env:TEMP "insightops-db-reset.sql"
+        $script:RESET_DATABASE_SQL | Set-Content -Path $tempSqlPath -Force
+
+        try {
+            Write-Host "Verifying database container status..." -ForegroundColor Yellow
+            $containerStatus = docker inspect -f '{{.State.Status}}' insightops_db 2>$null
+            
+            if ($containerStatus -ne 'running') {
+                Write-Warning "Database container is not running. Starting container..."
+                docker-compose up -d postgres
+                Start-Sleep -Seconds 10 # Wait for container startup
+            }
+
+            # Copy SQL file to container
+            Write-Host "Copying reset script to container..." -ForegroundColor Yellow
+            $copyResult = docker cp $tempSqlPath insightops_db:/tmp/reset-db.sql
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to copy reset script to container: $copyResult"
+            }
+
+            # Execute reset script
+            Write-Host "Executing database reset..." -ForegroundColor Yellow
+            $resetResult = docker exec insightops_db psql -U insightops_user -d postgres -f /tmp/reset-db.sql 2>&1
+            
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "`n✓ Database reset successful" -ForegroundColor Green
+                Write-Host "✓ Migration history cleaned up" -ForegroundColor Green
+                Write-Host "✓ Ready for new migrations" -ForegroundColor Green
+            }
+            else {
+                throw "Database reset failed with exit code $LASTEXITCODE. Output: $resetResult"
+            }
+
+            # Verify database exists
+            $verifyDb = docker exec insightops_db psql -U insightops_user -lqt | Select-String "insightops_db"
+            if (-not $verifyDb) {
+                throw "Database verification failed - insightops_db not found after reset"
+            }
+
+            return $true
+        }
+        finally {
+            # Cleanup
+            if (Test-Path $tempSqlPath) {
+                Remove-Item $tempSqlPath -Force -ErrorAction SilentlyContinue
+            }
+            
+            # Clean up SQL file from container
+            docker exec insightops_db rm -f /tmp/reset-db.sql 2>$null
+        }
+    }
+    catch {
+        Write-Error "Database reset failed: $_"
+        Write-Host "`nTroubleshooting steps:" -ForegroundColor Yellow
+        Write-Host "1. Verify postgres container is running (docker ps)" -ForegroundColor Yellow
+        Write-Host "2. Check postgres logs (docker logs insightops_db)" -ForegroundColor Yellow
+        Write-Host "3. Verify database credentials in configuration" -ForegroundColor Yellow
+        Write-Host "4. Ensure no active connections are blocking operations" -ForegroundColor Yellow
+        return $false
+    }
+}
+
+function Test-DatabaseConnection {
+    [CmdletBinding()]
+    param()
+    
+    try {
+        Write-Host "Testing database connection..." -ForegroundColor Yellow
+        $result = docker exec insightops_db pg_isready -U insightops_user -d insightops_db
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✓ Database connection successful" -ForegroundColor Green
+            return $true
+        }
+        else {
+            Write-Warning "Database connection failed. Status: $result"
+            return $false
+        }
+    }
+    catch {
+        Write-Error "Error testing database connection: $_"
+        return $false
+    }
+}
+
+function Get-DatabaseSize {
+    [CmdletBinding()]
+    param()
+    
+    try {
+        $query = "SELECT pg_size_pretty(pg_database_size('insightops_db'));"
+        $size = docker exec insightops_db psql -U insightops_user -d insightops_db -t -c $query
+        return $size.Trim()
+    }
+    catch {
+        Write-Error "Error getting database size: $_"
+        return "Unknown"
+    }
+}
+
+function Show-DatabaseStatus {
+    [CmdletBinding()]
+    param()
+    
+    try {
+        Write-Host "`nDatabase Status:" -ForegroundColor Cyan
+        Write-Host "----------------" -ForegroundColor Cyan
+        
+        # Container Status
+        $containerStatus = docker inspect -f '{{.State.Status}}' insightops_db 2>$null
+        Write-Host "Container Status: " -NoNewline
+        Write-Host $containerStatus -ForegroundColor $(if ($containerStatus -eq 'running') { 'Green' } else { 'Red' })
+
+        # Connection Test
+        $connectionStatus = Test-DatabaseConnection
+        Write-Host "Connection Status: " -NoNewline
+        Write-Host $(if ($connectionStatus) { "Connected" } else { "Disconnected" }) -ForegroundColor $(if ($connectionStatus) { 'Green' } else { 'Red' })
+
+        # Database Size
+        $dbSize = Get-DatabaseSize
+        Write-Host "Database Size: $dbSize"
+
+        # Active Connections
+        $connectionsQuery = "SELECT count(*) FROM pg_stat_activity WHERE datname = 'insightops_db';"
+        $connections = docker exec insightops_db psql -U insightops_user -d insightops_db -t -c $connectionsQuery
+        Write-Host "Active Connections: $($connections.Trim())"
+        
+        return $true
+    }
+    catch {
+        Write-Error "Error getting database status: $_"
+        return $false
+    }
+}
+
 function Rebuild-DockerService {
+    [CmdletBinding()]
+    param (
+        [string]$ServiceName = $null
+    )
+
+    try {
+        # Verify Docker Compose file
+        Write-Host "Verifying Docker Compose file..." -ForegroundColor Yellow
+
+        # Database reset with proper handling
+        if (-not $SkipDatabaseReset) {
+            Write-Host "`nPreparing database reset..." -ForegroundColor Yellow
+            $dbStatus = Show-DatabaseStatus
+            
+            if (-not $ServiceName -or $ServiceName -in @('orderservice', 'inventoryservice')) {
+                $resetConfirm = Read-Host "`nWould you like to reset the database? (y/n)"
+                if ($resetConfirm -eq 'y') {
+                    if (-not (Reset-Database)) {
+                        throw "Database reset failed"
+                    }
+                    Write-Host "✓ Database reset completed" -ForegroundColor Green
+                } else {
+                    Write-Host "Skipping database reset" -ForegroundColor Yellow
+                }
+            }
+        }
+
+        if (-not $script:DOCKER_COMPOSE_PATH) {
+            $script:DOCKER_COMPOSE_PATH = Join-Path $env:CONFIG_PATH "docker-compose.yml"
+            if (-not (Test-Path $script:DOCKER_COMPOSE_PATH)) {
+                Write-Error "Docker Compose configuration not found at: $script:DOCKER_COMPOSE_PATH"
+                throw "Docker Compose configuration not found"
+            } else {
+                Write-Host "Docker Compose file found: $script:DOCKER_COMPOSE_PATH" -ForegroundColor Green
+            }
+        }
+
+        # Create a temporary script for Docker commands
+        $tempScriptPath = Join-Path $env:TEMP "docker-compose-commands.cmd"
+        
+        # Create commands file with proper path handling
+        $commands = @"
+@echo off
+REM Validate configuration
+docker compose --file `"$script:DOCKER_COMPOSE_PATH`" config
+
+REM Stop existing containers
+"@
+        if ($ServiceName) {
+            $commands += "`ndocker compose --file `"$script:DOCKER_COMPOSE_PATH`" stop $ServiceName"
+        } else {
+            $commands += "`ndocker compose --file `"$script:DOCKER_COMPOSE_PATH`" down --volumes --remove-orphans"
+        }
+
+        $commands += @"
+
+REM Build and start services
+"@
+        if ($ServiceName) {
+            $commands += @"
+docker compose --file `"$script:DOCKER_COMPOSE_PATH`" build $ServiceName
+docker compose --file `"$script:DOCKER_COMPOSE_PATH`" up -d $ServiceName
+"@
+        } else {
+            $commands += @"
+docker compose --file `"$script:DOCKER_COMPOSE_PATH`" build
+docker compose --file `"$script:DOCKER_COMPOSE_PATH`" up -d
+"@
+        }
+
+        # Write commands to file
+        $commands | Set-Content -Path $tempScriptPath -Force
+        Write-Host "Created temporary command file: $tempScriptPath" -ForegroundColor Gray
+
+        # Setup environment variables
+        Write-Host "Setting up environment variables..." -ForegroundColor Yellow
+        $env:NAMESPACE = if ([string]::IsNullOrEmpty($env:NAMESPACE)) { "insightops" } else { $env:NAMESPACE }
+        Write-Host "Namespace set to: $env:NAMESPACE" -ForegroundColor Cyan
+
+        # Create keys directory
+        Write-Host "Creating keys directory..." -ForegroundColor Yellow
+        $keysPath = Join-Path $env:CONFIG_PATH "keys"
+        if (-not (Test-Path $keysPath)) {
+            New-Item -ItemType Directory -Path $keysPath -Force | Out-Null
+            Write-Host "Keys directory created: $keysPath" -ForegroundColor Green
+        } else {
+            Write-Host "Keys directory exists: $keysPath" -ForegroundColor Cyan
+        }
+
+        # Initialize Grafana dashboards
+        Write-Host "Initializing Grafana dashboards..." -ForegroundColor Cyan
+        try {
+            Initialize-GrafanaDashboards
+            Write-Host "✓ Grafana dashboards initialized" -ForegroundColor Green
+        } catch {
+            Write-Error "Failed to initialize Grafana dashboards: $_"
+            $_ | Format-List -Force
+        }
+
+        # Setup Docker volumes
+        Write-Host "Setting up Docker volumes..." -ForegroundColor Cyan
+        try {
+            Setup-DockerVolumes
+            Write-Host "✓ Docker volumes configured" -ForegroundColor Green
+        } catch {
+            Write-Error "Failed to setup Docker volumes: $_"
+            $_ | Format-List -Force
+        }
+
+        # Execute Docker commands
+        Write-Host "`nExecuting Docker commands..." -ForegroundColor Cyan
+        $output = & $tempScriptPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Docker commands failed with exit code $LASTEXITCODE. Output: $output"
+        }
+
+        # Wait for services to initialize
+        Write-Host "Waiting for services to initialize..." -ForegroundColor Cyan
+        Start-Sleep -Seconds 30
+
+        # Check service health
+        Write-Host "Checking service health..." -ForegroundColor Cyan
+        $services = if ($ServiceName) { @($ServiceName) } else { @("frontend", "apigateway", "orderservice", "inventoryservice") }
+        
+        foreach ($svc in $services) {
+            $containerName = "${env:NAMESPACE}_$svc"
+            try {
+                $status = & cmd /c "docker inspect --format='{{.State.Health.Status}}' $containerName" 2>$null
+                if ($status) {
+                    Write-Host "`nService: $svc" -ForegroundColor Cyan
+                    Write-Host "Status: $status" -ForegroundColor $(if ($status -eq 'healthy') { 'Green' } else { 'Yellow' })
+                } else {
+                    Write-Warning "Service $svc is not running or does not exist."
+                }
+
+                # Save logs
+                $logDir = ".\docker_logs"
+                if (-not (Test-Path $logDir)) {
+                    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+                }
+
+                if (& cmd /c "docker ps -a --filter name=$containerName") {
+                    Write-Host "Retrieving logs for $containerName..." -ForegroundColor Yellow
+                    $logFilePath = Join-Path $logDir "$containerName.log"
+                    & cmd /c "docker logs $containerName > `"$logFilePath`" 2>&1"
+                    Write-Host "✓ Logs saved to: $logFilePath" -ForegroundColor Green
+                }
+            } catch {
+                Write-Error "Failed to check service $svc : $_"
+            }
+        }
+
+        Write-Host "`n✓ Service rebuild completed successfully" -ForegroundColor Green
+        return $true
+    } catch {
+        Write-Error "Failed to rebuild services: $_"
+        $_ | Format-List -Force
+        return $false
+    } finally {
+        # Cleanup
+        if ($tempScriptPath -and (Test-Path $tempScriptPath)) {
+            Remove-Item $tempScriptPath -Force
+        }
+        Remove-Item Env:\NAMESPACE -ErrorAction SilentlyContinue
+    }
+}
+
+function __Rebuild-DockerService {
     [CmdletBinding()]
     param (
         [string]$ServiceName = $null
@@ -1541,7 +1948,11 @@ Export-ModuleMember -Function @(
     'Test-PreRebuildRequirements',
     'Test-DirectoryStructure',
     'Reset-Database',
+    'Test-DatabaseConnection',
+    'Get-DatabaseSize',
+    'Show-DatabaseStatus',
     'Set-GrafanaPermissions',
     'Test-DashboardJson',
-    'Test-GrafanaConfiguration'
+    'Test-GrafanaConfiguration',
+    'Test-DockerPrerequisites'
 )

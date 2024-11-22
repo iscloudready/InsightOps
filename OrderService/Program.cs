@@ -12,6 +12,7 @@ using OrderService.Interfaces;
 using OrderService.Services;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -126,21 +127,71 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
-        logger.LogInformation("Initializing database...");
+        logger.LogInformation("Starting database initialization...");
         var context = services.GetRequiredService<OrderDbContext>();
 
-        // Run migrations
-        await context.Database.MigrateAsync();
-        logger.LogInformation("Database migration completed");
+        // First check database connectivity
+        if (!(await context.Database.CanConnectAsync()))
+        {
+            logger.LogInformation("Database connection not established. Creating database...");
+            await context.Database.EnsureCreatedAsync();
+        }
 
-        // Initialize seed data
-        await DbInitializer.InitializeAsync(context, logger);
+        // Check for pending migrations
+        var pendingMigrations = await context.Database.GetPendingMigrationsAsync();
+        var pendingMigrationsList = pendingMigrations.ToList();
+
+        if (pendingMigrationsList.Any())
+        {
+            logger.LogInformation("Found {Count} pending migrations: {@Migrations}",
+                pendingMigrationsList.Count,
+                pendingMigrationsList);
+
+            await context.Database.MigrateAsync();
+            logger.LogInformation("Successfully applied pending migrations");
+        }
+        else
+        {
+            logger.LogInformation("No pending migrations found. Database is up to date.");
+        }
+
+        // Check if we need to seed data
+        var hasData = await context.Orders.AnyAsync();
+        if (!hasData)
+        {
+            logger.LogInformation("Initializing seed data...");
+            await DbInitializer.InitializeAsync(context, logger);
+            logger.LogInformation("Seed data initialization completed");
+        }
+        else
+        {
+            logger.LogInformation("Database already contains data. Skipping seed initialization.");
+        }
+
         logger.LogInformation("Database initialization completed successfully");
+    }
+    catch (PostgresException pgEx) // Handle specific Postgres exceptions
+    {
+        logger.LogError(pgEx, "PostgreSQL error during database initialization. Error Code: {ErrorCode}, Detail: {Detail}",
+            pgEx.SqlState,
+            pgEx.Detail);
+
+        if (pgEx.SqlState == "42P07") // Table already exists
+        {
+            logger.LogWarning("Migration history table already exists. This is expected if database was previously initialized.");
+            // Continue execution rather than throwing
+        }
+        else
+        {
+            throw; // Rethrow unknown Postgres errors
+        }
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "An error occurred while initializing the database");
-        throw; // Rethrow to stop application startup on database initialization failure
+        logger.LogError(ex, "An error occurred while initializing the database: {Message}", ex.Message);
+
+        // Add additional context to the exception
+        throw new ApplicationException("Failed to initialize database. See inner exception for details.", ex);
     }
 }
 
