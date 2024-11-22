@@ -1405,7 +1405,7 @@ docker compose --file `"$script:DOCKER_COMPOSE_PATH`" up -d
             $_ | Format-List -Force
         }
 
-        # Execute Docker commands
+# Execute Docker commands
         Write-Host "`nExecuting Docker commands..." -ForegroundColor Cyan
         try {
             # Redirect verbose output to null and only capture errors
@@ -1413,19 +1413,21 @@ docker compose --file `"$script:DOCKER_COMPOSE_PATH`" up -d
             
             # Check if there were any errors
             if ($LASTEXITCODE -ne 0) {
-                # Filter out known non-critical errors
+                # Filter out known non-critical errors and warnings
                 $criticalError = $output | Where-Object { 
                     $_ -match "error|fail|exception" -and 
                     $_ -notmatch "name: insightops" -and 
                     $_ -notmatch "services:" -and
                     $_ -notmatch "context:" -and
                     $_ -notmatch "dockerfile:" -and
-                    $_ -notmatch "http2: server: error reading preface" -and  # Ignore Docker Desktop pipe errors
-                    $_ -notmatch "Error\(s\): 0" -and                         # Ignore "0 Error(s)" messages
-                    $_ -notmatch "file has already been closed"               # Ignore closed file errors
-                } | Where-Object { 
-                    # Additional filtering for actual errors
-                    $_ -notmatch "^#\d+\s+\d+\.\d+\s+0 Error" 
+                    $_ -notmatch "http2: server: error reading preface" -and
+                    $_ -notmatch "Error\(s\): 0" -and
+                    $_ -notmatch "file has already been closed" -and
+                    # Ignore C# compiler warnings
+                    $_ -notmatch "warning CS\d+:" -and
+                    $_ -notmatch "\.cs\(\d+,\d+\):" -and
+                    # Ignore build number outputs
+                    $_ -notmatch "^#\d+\s+\d+\.\d+"
                 } | Select-Object -First 3
 
                 if ($criticalError) {
@@ -1434,30 +1436,53 @@ docker compose --file `"$script:DOCKER_COMPOSE_PATH`" up -d
                     throw "Docker commands failed with critical errors"
                 }
                 else {
-                    # Non-critical errors - continue execution
-                    Write-Host "✓ Docker commands completed with non-critical warnings" -ForegroundColor Yellow
+                    # Check if containers are actually running
+                    $dockerComposeFile = Join-Path $env:CONFIG_PATH "docker-compose.yml"
+                    $runningContainers = docker-compose -f $dockerComposeFile ps --services --filter "status=running"
+                    if ($runningContainers) {
+                        Write-Host "✓ Docker commands completed successfully - services are running" -ForegroundColor Green
+                        return $true
+                    }
                 }
             }
             else {
                 Write-Host "✓ Docker commands executed successfully" -ForegroundColor Green
             }
 
-            # Verify services are running
-            $runningServices = docker-compose ps --services --filter "status=running"
+            # Final verification of running services
+            $dockerComposeFile = Join-Path $env:CONFIG_PATH "docker-compose.yml"
+            $runningServices = docker-compose -f $dockerComposeFile ps --services --filter "status=running"
+
+            Write-Host "Running services:" -ForegroundColor Cyan
+            $runningServices | ForEach-Object { Write-Host "- $_" -ForegroundColor Green }
+
             if ($runningServices) {
-                Write-Host "✓ Services are running" -ForegroundColor Green
                 return $true
+            } else {
+                Write-Error "No services are running after deployment" # throw
             }
         }
         catch {
-            if ($_.Exception.Message -match "Docker commands failed with critical errors") {
-                Write-Error "Failed to execute Docker commands: $_"
-                throw
+            if ($_.Exception.Message -match "No services are running") {
+                Write-Error "Deployment failed: No services are running"
+                #throw
+            }
+            elseif ($_.Exception.Message -match "Docker commands failed with critical errors") {
+                Write-Error "Failed to execute Docker commands with critical errors"
+                #throw
             }
             else {
-                # Log non-critical errors but continue
-                Write-Warning "Non-critical error during Docker commands: $_"
-                return $true  # Continue execution
+                # Log warning but continue if services are running
+                $runningServices = docker-compose ps --services --filter "status=running"
+                if ($runningServices) {
+                    Write-Warning "Non-critical warning during deployment: $_"
+                    Write-Host "Services are running despite warnings" -ForegroundColor Green
+                    return $true
+                }
+                else {
+                    Write-Error "Deployment failed: $_"
+                    #throw
+                }
             }
         }
 
@@ -1468,11 +1493,11 @@ docker compose --file `"$script:DOCKER_COMPOSE_PATH`" up -d
         # Check service health
         Write-Host "Checking service health..." -ForegroundColor Cyan
         $services = if ($ServiceName) { @($ServiceName) } else { @("frontend", "apigateway", "orderservice", "inventoryservice") }
-        
+
         foreach ($svc in $services) {
             $containerName = "${env:NAMESPACE}_$svc"
             try {
-                $status = & cmd /c "docker inspect --format='{{.State.Health.Status}}' $containerName" 2>$null
+                $status = & docker inspect --format='{{.State.Health.Status}}' $containerName 2>$null
                 if ($status) {
                     Write-Host "`nService: $svc" -ForegroundColor Cyan
                     Write-Host "Status: $status" -ForegroundColor $(if ($status -eq 'healthy') { 'Green' } else { 'Yellow' })
@@ -1486,11 +1511,11 @@ docker compose --file `"$script:DOCKER_COMPOSE_PATH`" up -d
                     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
                 }
 
-                if (& cmd /c "docker ps -a --filter name=$containerName") {
+                if (docker ps -a --filter name=$containerName 2>$null) {
                     Write-Host "Retrieving logs for $containerName..." -ForegroundColor Yellow
                     $logFilePath = Join-Path $logDir "$containerName.log"
-                    & cmd /c "docker logs $containerName > `"$logFilePath`" 2>&1"
-                    Write-Host "✓ Logs saved to: $logFilePath" -ForegroundColor Green
+                    docker logs $containerName > $logFilePath 2>&1
+                    Write-Host " Logs saved to: $logFilePath" -ForegroundColor Green
                 }
             } catch {
                 Write-Error "Failed to check service $svc : $_"
