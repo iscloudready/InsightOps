@@ -1,26 +1,216 @@
-# Monitoring.psm1
-function Initialize-Monitoring {
+# Define the schema template
+$dashboardSchema = @"
+{
+  "`$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Grafana Dashboard",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Dashboard title"
+    },
+    "uid": {
+      "type": "string",
+      "description": "Dashboard UID"
+    },
+    "panels": {
+      "type": "array",
+      "items": {
+        "`$ref": "#/definitions/panel"
+      }
+    }
+  },
+  "required": ["title", "uid", "panels"],
+  "definitions": {
+    "panel": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Panel title"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["timeseries", "table", "graph"]
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "`$ref": "#/definitions/target"
+          }
+        }
+      },
+      "required": ["title", "type"]
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "expr": {
+          "type": "string",
+          "description": "Target expression"
+        }
+      },
+      "required": ["expr"]
+    }
+  }
+}
+"@
+
+Function Validate-Dashboard {
+    param (
+        [string]$Content,
+        [string]$Schema
+    )
+
+    try {
+        # Load schema and dashboard JSON
+        $dashboardJson = ConvertFrom-Json -InputObject $Content -ErrorAction Stop
+
+        # Additional validation logic
+        if (-not $dashboardJson.title) {
+            Write-Error "Dashboard title is missing."
+            return $false
+        }
+
+        if (-not $dashboardJson.uid) {
+            Write-Error "Dashboard UID is missing."
+            return $false
+        }
+
+        if (-not $dashboardJson.panels) {
+            Write-Error "Dashboard panels are missing."
+            return $false
+        }
+
+        foreach ($panel in $dashboardJson.panels) {
+            if (-not $panel.title) {
+                Write-Error "Panel title is missing."
+                return $false
+            }
+
+            if (-not $panel.type) {
+                Write-Error "Panel type is missing."
+                return $false
+            }
+
+            if ($panel.type -eq "timeseries") {
+                if (-not $panel.targets) {
+                    Write-Error "Timeseries panel targets are missing."
+                    return $false
+                }
+
+                foreach ($target in $panel.targets) {
+                    if (-not $target.expr) {
+                        Write-Error "Timeseries panel target expression is missing."
+                        return $false
+                    }
+                }
+            }
+        }
+
+        Write-Verbose "Dashboard validated successfully"
+        return $true
+    } catch {
+        Write-Error "Error parsing dashboard JSON: $($Error[0].Message)"
+        return $false
+    }
+}
+
+Function _Validate-Dashboard {
+    param (
+        [string]$Content,
+        [string]$Schema
+    )
+
+    try {
+        # Load schema and dashboard JSON
+        $schemaJson = ConvertFrom-Json -InputObject $Schema
+        $dashboardJson = ConvertFrom-Json -InputObject $Content
+
+        # Validation logic for matching against the schema (extend as needed)
+        if (-not ($dashboardJson -is [System.Collections.Hashtable])) {
+            Write-Error "Dashboard does not match expected schema format."
+            return $false
+        }
+
+        # Additional validation logic
+        if (-not $dashboardJson.title) {
+            Write-Error "Dashboard title is missing."
+            return $false
+        }
+
+        if (-not $dashboardJson.uid) {
+            Write-Error "Dashboard UID is missing."
+            return $false
+        }
+
+        if (-not $dashboardJson.panels) {
+            Write-Error "Dashboard panels are missing."
+            return $false
+        }
+
+        foreach ($panel in $dashboardJson.panels) {
+            if (-not $panel.title) {
+                Write-Error "Panel title is missing."
+                return $false
+            }
+
+            if (-not $panel.type) {
+                Write-Error "Panel type is missing."
+                return $false
+            }
+
+            if ($panel.type -eq "timeseries") {
+                if (-not $panel.targets) {
+                    Write-Error "Timeseries panel targets are missing."
+                    return $false
+                }
+
+                foreach ($target in $panel.targets) {
+                    if (-not $target.expr) {
+                        Write-Error "Timeseries panel target expression is missing."
+                        return $false
+                    }
+                }
+            }
+        }
+
+        Write-Verbose "Dashboard validated successfully"
+        return $true
+    } catch [System.ArgumentException] {
+        Write-Error "Error parsing dashboard JSON: $($Error[0].Message)"
+        return $false
+    } catch [System.Management.Automation.ParsingException] {
+        Write-Error "Error parsing schema JSON: $($Error[0].Message)"
+        return $false
+    } catch {
+        Write-Error "Unexpected error during validation: $($Error[0].Message)"
+        return $false
+    }
+}
+
+Function Initialize-Monitoring {
     param (
         [string]$ConfigPath
     )
 
-    # Create dashboard directory
+    # Create the dashboard directory
     $dashboardPath = Join-Path $ConfigPath "grafana/dashboards"
     if (-not (Test-Path $dashboardPath)) {
-        New-Item -ItemType Directory -Path $dashboardPath -Force
+        New-Item -ItemType Directory -Path $dashboardPath -Force | Out-Null
     }
 
-    # Combine original and new dashboards
+    # Define dashboard configurations
     $dashboards = @(
-        @{ FileName = "api-gateway.json"; Content = Get-ApiGatewayDashboard },
-        @{ FileName = "security.json"; Content = Get-SecurityDashboard },
-        @{ FileName = "service-health.json"; Content = Get-ServiceHealthDashboard },
-        @{ FileName = "frontend-realtime.json"; Content = Get-FrontendRealtimeDashboard },
-        @{ FileName = "orders-realtime.json"; Content = Get-OrdersRealtimeDashboard },
-        @{ FileName = "inventory-realtime.json"; Content = Get-InventoryRealtimeDashboard },
-        @{ FileName = "frontend-service.json"; Content = Get-FrontendServiceDashboard },
-        @{ FileName = "inventory-service.json"; Content = Get-InventoryServiceDashboard },
-        @{ FileName = "order-service.json"; Content = Get-OrderServiceDashboard }
+        @{ FileName = "api-gateway.json"; Content = (Get-ApiGatewayDashboard) },
+        @{ FileName = "security.json"; Content = (Get-SecurityDashboard) },
+        @{ FileName = "service-health.json"; Content = (Get-ServiceHealthDashboard) },
+        @{ FileName = "frontend-realtime.json"; Content = (Get-FrontendRealtimeDashboard) },
+        @{ FileName = "orders-realtime.json"; Content = (Get-OrdersRealtimeDashboard) },
+        @{ FileName = "inventory-realtime.json"; Content = (Get-InventoryRealtimeDashboard) },
+        @{ FileName = "frontend-service.json"; Content = (Get-FrontendServiceDashboard) },
+        @{ FileName = "inventory-service.json"; Content = (Get-InventoryServiceDashboard) },
+        @{ FileName = "order-service.json"; Content = (Get-OrderServiceDashboard) }
     )
 
     foreach ($dashboard in $dashboards) {
@@ -28,45 +218,49 @@ function Initialize-Monitoring {
         $content = $dashboard.Content
 
         try {
+            # Validate JSON content using Validate-Dashboard
+            Write-Verbose "Validating dashboard: $($dashboard.FileName)"
+            $isValid = Validate-Dashboard -Content $content -Schema $dashboardSchema
+
+            if (-not $isValid) {
+                Write-Warning "Dashboard validation failed: $($dashboard.FileName)"
+                continue
+            }
+
+            # Write JSON to file with UTF-8 without BOM
             $Utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
             [System.IO.File]::WriteAllText($path, $content, $Utf8NoBomEncoding)
+
+            Write-Verbose "Successfully saved dashboard: $path"
         } catch {
-            Write-Error "Error saving dashboard file: $path"
+            Write-Error "Error processing dashboard file ($path): $_"
         }
     }
 }
 
-function Validate-Dashboard {
+Function _Validate-Dashboard {
     param (
         [string]$DashboardPath,
-        [string]$SchemaPath
+        [string]$SchemaPath,
+        [string]$Content
     )
 
     try {
         # Load schema and dashboard JSON
         $schema = Get-Content $SchemaPath -Raw | ConvertFrom-Json
-        $dashboard = Get-Content $DashboardPath -Raw | ConvertFrom-Json
+        $dashboardJson = ConvertFrom-Json -InputObject $Content
 
-        # Check encoding
-        $encoding = (Get-Content $DashboardPath -Encoding Byte -TotalCount 3) -join '-'
-        if ($encoding -ne '239-187-191') { # UTF-8 BOM
-            Write-Warning "Dashboard file is not encoded in UTF-8 with BOM: $DashboardPath"
-        }
-
-        # Remove invisible characters
-        $dashboard = $dashboard | ForEach-Object { $_.Replace([char]160, ' ') }
-
-        # Check validation
-        if ($dashboard -is $schema) {
-            Write-Host "Dashboard is valid: $DashboardPath"
-            return $true
-        } else {
-            Write-Host "Invalid dashboard: $DashboardPath"
+        # Validation logic for matching against the schema (extend as needed)
+        if (-not ($dashboardJson -is [System.Collections.Hashtable])) {
+            Write-Error "Dashboard does not match expected schema format."
             return $false
         }
+
+        Write-Verbose "Dashboard validated successfully: $DashboardPath"
+        return $true
     } catch {
         $errorMessage = $_.Message
-        Write-Error "Validation failed for ${DashboardPath}: ${errorMessage}"
+        Write-Error "Validation failed for ${DashboardPath}: $($errorMessage)"
         return $false
     }
 }
@@ -187,7 +381,7 @@ function Get-OrdersRealtimeDashboard {
 
 function Get-FrontendRealtimeDashboard {
     return @'
-    {
+{
   "title": "Frontend Real-Time Metrics",
   "uid": "frontend-realtime",
   "tags": ["frontend", "realtime"],
@@ -202,7 +396,12 @@ function Get-FrontendRealtimeDashboard {
           "expr": "sum(frontend_active_sessions)"
         }
       ],
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
       "options": {
         "thresholds": [
           { "color": "green", "value": null },
@@ -220,7 +419,12 @@ function Get-FrontendRealtimeDashboard {
           "expr": "frontend_page_load_time_seconds{quantile=\"0.95\"}"
         }
       ],
-      "gridPos": {"h": 8, "w": 16, "x": 8, "y": 0}
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 0
+      }
     }
   ]
 }
@@ -326,68 +530,69 @@ function Get-SecurityDashboard {
 }
 
 function Get-ApiGatewayDashboard {
-    return @'
-    {
-  "title": "API Gateway Metrics",
-  "uid": "api-gateway-metrics",
-  "tags": ["api-gateway", "routing"],
-  "panels": [
-    {
-      "title": "Gateway Request Flow",
-      "type": "stat-timeline",
-      "datasource": "Prometheus",
-      "targets": [
+    $json = @"
+{
+    "title": "API Gateway Metrics",
+    "uid": "api-gateway-metrics",
+    "tags": ["api-gateway", "routing"],
+    "panels": [
         {
-          "expr": "sum(rate(gateway_requests_total[1m])) by (service)",
-          "legendFormat": "{{service}}"
-        }
-      ],
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
-      "options": {
-        "showValue": "always",
-        "colWidth": 0.9
-      }
-    },
-    {
-      "title": "Route Latencies",
-      "type": "heatmap",
-      "datasource": "Prometheus",
-      "targets": [
-        {
-          "expr": "rate(gateway_route_duration_seconds_bucket[5m])",
-          "legendFormat": "{{route}}"
-        }
-      ],
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
-    },
-    {
-      "title": "Circuit Breaker Status",
-      "type": "table",
-      "datasource": "Prometheus",
-      "targets": [
-        {
-          "expr": "gateway_circuit_breaker_state",
-          "instant": true
-        }
-      ],
-      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 8},
-      "transformations": [
-        {
-          "type": "organize",
-          "config": {
-            "indexByName": {},
-            "renameByName": {
-              "endpoint": "Endpoint",
-              "state": "State",
-              "failures": "Failures"
+            "title": "Gateway Request Flow",
+            "type": "stat-timeline",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(rate(gateway_requests_total[1m])) by (service)",
+                    "legendFormat": "{{service}}"
+                }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+            "options": {
+                "showValue": "always",
+                "colWidth": 0.9
             }
-          }
+        },
+        {
+            "title": "Route Latencies",
+            "type": "heatmap",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "rate(gateway_route_duration_seconds_bucket[5m])",
+                    "legendFormat": "{{route}}"
+                }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+        },
+        {
+            "title": "Circuit Breaker Status",
+            "type": "table",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "gateway_circuit_breaker_state",
+                    "instant": true
+                }
+            ],
+            "gridPos": {"h": 6, "w": 24, "x": 0, "y": 8},
+            "transformations": [
+                {
+                    "type": "organize",
+                    "config": {
+                        "indexByName": {},
+                        "renameByName": {
+                            "endpoint": "Endpoint",
+                            "state": "State",
+                            "failures": "Failures"
+                        }
+                    }
+                }
+            ]
         }
-      ]
-    }
-  ]
+    ]
 }
-'@
+"@
+    return $json
 }
 
 # Dashboard Functions (Professional Dashboards)
@@ -421,7 +626,7 @@ function Get-FrontendServiceDashboard {
             "datasource": "Prometheus",
             "targets": [
                 {
-                    "expr": "frontend_page_load_time_seconds{quantile=""0.95""}"
+                    "expr": "frontend_page_load_time_seconds{quantile='0.95'}"
                 }
             ],
             "gridPos": {
