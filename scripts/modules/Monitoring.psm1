@@ -56,6 +56,43 @@ $dashboardSchema = @"
 }
 "@
 
+# Add this function to explicitly check file encoding
+Function Test-FileEncoding {
+    param (
+        [string]$Path
+    )
+    
+    $bytes = Get-Content -Path $Path -Raw -Encoding Byte
+    Write-Verbose "First three bytes: $($bytes[0]) $($bytes[1]) $($bytes[2])"
+    
+    # Check for BOM
+    if ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        Write-Warning "File $Path has UTF-8 BOM"
+        return $false
+    }
+    return $true
+}
+
+# Modify the file writing in Initialize-Monitoring
+try {
+    $cleanContent = $content | ConvertFrom-Json | ConvertTo-Json -Depth 100 -Compress:$false
+    
+    # Try alternative approach using Out-File
+    $cleanContent | Out-File -FilePath $path -Encoding utf8NoBOM -NoNewline
+    
+    # Verify the file
+    if (-not (Test-FileEncoding -Path $path)) {
+        Write-Error "File was written with BOM: $path"
+        # Try to fix it
+        $bytes = [System.IO.File]::ReadAllBytes($path)
+        if ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            [System.IO.File]::WriteAllBytes($path, $bytes[3..($bytes.Length-1)])
+        }
+    }
+} catch {
+    Write-Error "Error writing dashboard: $($_.Exception.Message)"
+}
+
 Function Write-JsonWithoutBOM {
     param (
         [string]$Path,
@@ -133,6 +170,7 @@ Function Validate-Dashboard {
 
 Function Initialize-Monitoring {
     param (
+        [Parameter(Mandatory=$true)]
         [string]$ConfigPath
     )
 
@@ -140,6 +178,7 @@ Function Initialize-Monitoring {
     $dashboardPath = Join-Path $ConfigPath "grafana/dashboards"
     if (-not (Test-Path $dashboardPath)) {
         New-Item -ItemType Directory -Path $dashboardPath -Force | Out-Null
+        Write-Verbose "Created dashboard directory: $dashboardPath"
     }
 
     # Define dashboard configurations
@@ -152,7 +191,8 @@ Function Initialize-Monitoring {
         @{ FileName = "inventory-realtime.json"; Content = (Get-InventoryRealtimeDashboard) },
         @{ FileName = "frontend-service.json"; Content = (Get-FrontendServiceDashboard) },
         @{ FileName = "inventory-service.json"; Content = (Get-InventoryServiceDashboard) },
-        @{ FileName = "order-service.json"; Content = (Get-OrderServiceDashboard) }
+        @{ FileName = "order-service.json"; Content = (Get-OrderServiceDashboard) },
+        @{ FileName = "overview.json"; Content = (Get-OverviewDashboard) }
     )
 
     foreach ($dashboard in $dashboards) {
@@ -160,8 +200,10 @@ Function Initialize-Monitoring {
         $content = $dashboard.Content
 
         try {
+            Write-Verbose "Processing dashboard: $($dashboard.FileName)"
+
             # Validate JSON content using Validate-Dashboard
-            Write-Verbose "Validating dashboard: $($dashboard.FileName)"
+            Write-Verbose "Validating dashboard content..."
             $isValid = Validate-Dashboard -Content $content -Schema $dashboardSchema
 
             if (-not $isValid) {
@@ -175,16 +217,53 @@ Function Initialize-Monitoring {
 
             # Write JSON to file without BOM
             try {
-                Write-JsonWithoutBOM -Path $path -Content $cleanContent
-                Write-Verbose "Successfully saved dashboard: $path"
+                # First attempt - write file
+                $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
+                [System.IO.File]::WriteAllText($path, $cleanContent, $utf8NoBomEncoding)
+                Write-Verbose "Initial file write completed: $path"
+
+                # Verify the encoding
+                $encodingCheck = Test-FileEncoding -Path $path
+                if (-not $encodingCheck) {
+                    Write-Verbose "BOM detected, attempting to fix..."
+                    # Read content and rewrite without BOM
+                    $bytes = [System.IO.File]::ReadAllBytes($path)
+                    if ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+                        [System.IO.File]::WriteAllBytes($path, $bytes[3..($bytes.Length-1)])
+                        Write-Verbose "BOM removed from file: $path"
+                    }
+                    
+                    # Verify again
+                    $secondCheck = Test-FileEncoding -Path $path
+                    if (-not $secondCheck) {
+                        Write-Warning "Failed to remove BOM from file: $path"
+                    } else {
+                        Write-Verbose "File successfully written without BOM: $path"
+                    }
+                }
+
+                Write-Host "Successfully processed dashboard: $($dashboard.FileName)" -ForegroundColor Green
             }
             catch {
                 Write-Error "Error writing to file ($path): $_"
+                continue
             }
         }
         catch {
             Write-Error "Error processing dashboard file ($path): $_"
+            continue
         }
+    }
+
+    Write-Host "`nDashboard initialization complete. Location: $dashboardPath" -ForegroundColor Cyan
+    Write-Host "Total dashboards processed: $($dashboards.Count)" -ForegroundColor Cyan
+    
+    # Final verification of all files
+    Write-Host "`nVerifying all dashboard files..." -ForegroundColor Yellow
+    Get-ChildItem -Path $dashboardPath -Filter "*.json" | ForEach-Object {
+        $verificationResult = Test-FileEncoding -Path $_.FullName
+        $status = if ($verificationResult) { "OK" } else { "Has BOM" }
+        Write-Host "$($_.Name): $status" -ForegroundColor $(if ($verificationResult) { "Green" } else { "Red" })
     }
 }
 
@@ -223,6 +302,102 @@ function Provision-Dashboard {
     catch {
         Write-Error "Error provisioning dashboard: $($_.Exception.Message)"
     }
+}
+
+function Get-OverviewDashboard {
+    return @'
+{
+    "title": "System Overview Dashboard",
+    "uid": "system-overview",
+    "tags": ["overview", "system"],
+    "refresh": "5s",
+    "panels": [
+        {
+            "title": "System Health Status",
+            "type": "gauge",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "avg(up{job=~\".*\"})*100",
+                    "legendFormat": "System Health"
+                }
+            ],
+            "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+            "options": {
+                "thresholds": [
+                    {"color": "red", "value": null},
+                    {"color": "yellow", "value": 80},
+                    {"color": "green", "value": 95}
+                ]
+            }
+        },
+        {
+            "title": "Active Services",
+            "type": "stat",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "count(up{job=~\".*\"} == 1)",
+                    "legendFormat": "Active Services"
+                }
+            ],
+            "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0}
+        },
+        {
+            "title": "Total Request Rate",
+            "type": "timeseries",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(rate(http_requests_total[5m]))",
+                    "legendFormat": "Requests/sec"
+                }
+            ],
+            "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0}
+        },
+        {
+            "title": "Error Rate by Service",
+            "type": "timeseries",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) by (service)",
+                    "legendFormat": "{{service}}"
+                }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+        },
+        {
+            "title": "Service Response Times",
+            "type": "heatmap",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(rate(http_request_duration_seconds_bucket[5m])) by (le)",
+                    "format": "heatmap"
+                }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+        },
+        {
+            "title": "System Resources",
+            "type": "timeseries",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(rate(process_cpu_seconds_total[5m])) by (job)",
+                    "legendFormat": "{{job}} - CPU"
+                },
+                {
+                    "expr": "sum(process_resident_memory_bytes) by (job)",
+                    "legendFormat": "{{job}} - Memory"
+                }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+        }
+    ]
+}
+'@
 }
 
 # Dashboard JSON definitions remain the same but with proper encoding handling
