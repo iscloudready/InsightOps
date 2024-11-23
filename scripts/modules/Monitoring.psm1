@@ -227,7 +227,7 @@ Function Initialize-Monitoring {
                 continue
             }
 
-            # Write JSON to file with UTF-8 without BOM
+            # Write JSON to file without BOM
             $Utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
             [System.IO.File]::WriteAllText($path, $content, $Utf8NoBomEncoding)
 
