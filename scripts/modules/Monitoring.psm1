@@ -185,6 +185,151 @@ Function Initialize-Monitoring {
     )
 
     # Create the dashboard directory
+    $dashboardPath = Join-Path $ConfigPath "grafana\dashboards"
+    if (-not (Test-Path $dashboardPath)) {
+        New-Item -ItemType Directory -Path $dashboardPath -Force | Out-Null
+    }
+
+    # Define dashboard configurations
+    $dashboards = @(
+        @{ FileName = "api-gateway.json"; Content = (Get-ApiGatewayDashboard) },
+        @{ FileName = "security.json"; Content = (Get-SecurityDashboard) },
+        @{ FileName = "service-health.json"; Content = (Get-ServiceHealthDashboard) },
+        @{ FileName = "frontend-realtime.json"; Content = (Get-FrontendRealtimeDashboard) },
+        @{ FileName = "orders-realtime.json"; Content = (Get-OrdersRealtimeDashboard) },
+        @{ FileName = "inventory-realtime.json"; Content = (Get-InventoryRealtimeDashboard) },
+        @{ FileName = "frontend-service.json"; Content = (Get-FrontendServiceDashboard) },
+        @{ FileName = "inventory-service.json"; Content = (Get-InventoryServiceDashboard) },
+        @{ FileName = "order-service.json"; Content = (Get-OrderServiceDashboard) },
+        @{ FileName = "overview.json"; Content = (Get-OverviewDashboard) }
+    )
+
+    # First, clean up existing files
+    if (Test-Path $dashboardPath) {
+        Get-ChildItem -Path $dashboardPath -Filter "*.json" | Remove-Item -Force
+    }
+
+    foreach ($dashboard in $dashboards) {
+        $path = Join-Path $dashboardPath $dashboard.FileName
+        $content = $dashboard.Content
+
+        try {
+            # Convert content to bytes directly
+            $contentBytes = [System.Text.Encoding]::ASCII.GetBytes($content)
+            
+            # Write bytes to file
+            [System.IO.File]::WriteAllBytes($path, $contentBytes)
+            
+            Write-Host "Processed: $($dashboard.FileName)" -ForegroundColor Green
+        }
+        catch {
+            Write-Error "Error processing $($dashboard.FileName): $_"
+        }
+    }
+
+    Write-Host "`nFinal Check:"
+    Get-ChildItem -Path $dashboardPath -Filter "*.json" | ForEach-Object {
+        $firstBytes = Get-Content -Path $_.FullName -Raw -Encoding Byte -TotalCount 3
+        if ($firstBytes[0] -eq 0xEF -and $firstBytes[1] -eq 0xBB -and $firstBytes[2] -eq 0xBF) {
+            Write-Host "$($_.Name): Has BOM" -ForegroundColor Red
+        } else {
+            Write-Host "$($_.Name): No BOM" -ForegroundColor Green
+        }
+    }
+}
+
+Function ___Initialize-Monitoring {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$ConfigPath
+    )
+
+    # Create the dashboard directory
+    $dashboardPath = Join-Path $ConfigPath "grafana\dashboards"
+    if (-not (Test-Path $dashboardPath)) {
+        New-Item -ItemType Directory -Path $dashboardPath -Force | Out-Null
+    }
+
+    # Define dashboard configurations
+    $dashboards = @(
+        @{ FileName = "api-gateway.json"; Content = (Get-ApiGatewayDashboard) },
+        @{ FileName = "security.json"; Content = (Get-SecurityDashboard) },
+        @{ FileName = "service-health.json"; Content = (Get-ServiceHealthDashboard) },
+        @{ FileName = "frontend-realtime.json"; Content = (Get-FrontendRealtimeDashboard) },
+        @{ FileName = "orders-realtime.json"; Content = (Get-OrdersRealtimeDashboard) },
+        @{ FileName = "inventory-realtime.json"; Content = (Get-InventoryRealtimeDashboard) },
+        @{ FileName = "frontend-service.json"; Content = (Get-FrontendServiceDashboard) },
+        @{ FileName = "inventory-service.json"; Content = (Get-InventoryServiceDashboard) },
+        @{ FileName = "order-service.json"; Content = (Get-OrderServiceDashboard) },
+        @{ FileName = "overview.json"; Content = (Get-OverviewDashboard) }
+    )
+
+    # First, clean up existing files
+    if (Test-Path $dashboardPath) {
+        Get-ChildItem -Path $dashboardPath -Filter "*.json" | Remove-Item -Force
+    }
+
+    foreach ($dashboard in $dashboards) {
+        $path = Join-Path $dashboardPath $dashboard.FileName
+        $content = $dashboard.Content
+
+        try {
+            # Validate JSON content
+            $isValid = Validate-Dashboard -Content $content -Schema $dashboardSchema
+            if (-not $isValid) {
+                Write-Warning "Dashboard validation failed: $($dashboard.FileName)"
+                continue
+            }
+
+            # Clean and format JSON
+            $jsonObject = $content | ConvertFrom-Json
+            $cleanContent = $jsonObject | ConvertTo-Json -Depth 100 -Compress:$false
+
+            # Write content using .NET directly to avoid BOM
+            $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
+            [System.IO.File]::WriteAllText($path, $cleanContent, $utf8NoBomEncoding)
+
+            # Verify file creation
+            if (Test-Path $path) {
+                # Read first few bytes to check for BOM
+                $bytes = [System.IO.File]::ReadAllBytes($path)
+                if ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+                    Write-Warning "BOM detected in file $($dashboard.FileName), attempting to fix..."
+                    # Remove BOM and rewrite
+                    [System.IO.File]::WriteAllBytes($path, $bytes[3..($bytes.Length-1)])
+                }
+                Write-Host "Successfully processed dashboard: $($dashboard.FileName)" -ForegroundColor Green
+            } else {
+                Write-Warning "Failed to create dashboard file: $($dashboard.FileName)"
+            }
+        }
+        catch {
+            Write-Error "Error processing dashboard file ($path): $_"
+        }
+    }
+
+    Write-Host "`nDashboard initialization complete. Location: $dashboardPath"
+    Write-Host "Total dashboards processed: $($dashboards.Count)"
+
+    # Final verification
+    Write-Host "`nVerifying files..."
+    Get-ChildItem -Path $dashboardPath -Filter "*.json" | ForEach-Object {
+        $fileContent = Get-Content -Path $_.FullName -Raw -Encoding Byte
+        if ($fileContent[0] -eq 0xEF -and $fileContent[1] -eq 0xBB -and $fileContent[2] -eq 0xBF) {
+            Write-Host "$($_.Name): Has BOM (Problem)" -ForegroundColor Red
+        } else {
+            Write-Host "$($_.Name): No BOM (Good)" -ForegroundColor Green
+        }
+    }
+}
+
+Function Initialize---Monitoring {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$ConfigPath
+    )
+
+    # Create the dashboard directory
     $dashboardPath = Join-Path $ConfigPath "grafana/dashboards"
     if (-not (Test-Path $dashboardPath)) {
         New-Item -ItemType Directory -Path $dashboardPath -Force | Out-Null
@@ -204,6 +349,9 @@ Function Initialize-Monitoring {
         @{ FileName = "overview.json"; Content = (Get-OverviewDashboard) }
     )
 
+    # First, clean up existing files
+    Get-ChildItem -Path $dashboardPath -Filter "*.json" | Remove-Item -Force
+
     foreach ($dashboard in $dashboards) {
         $path = Join-Path $dashboardPath $dashboard.FileName
         $content = $dashboard.Content
@@ -220,9 +368,26 @@ Function Initialize-Monitoring {
             $jsonObject = $content | ConvertFrom-Json
             $cleanContent = $jsonObject | ConvertTo-Json -Depth 100 -Compress:$false
 
-            # Write file directly without BOM
-            Write-JsonWithoutBOM -Path $path -Content $cleanContent
-            Write-Host "Successfully processed dashboard: $($dashboard.FileName)" -ForegroundColor Green
+            # Write to a temporary file first
+            $tempFile = [System.IO.Path]::GetTempFileName()
+            $cleanContent | Out-File -FilePath $tempFile -Encoding ASCII -NoNewline
+
+            # Use Linux command to ensure proper encoding and copy to final destination
+            $copyCommand = "cat '$tempFile' | tr -d '\r' > '$path'"
+            $result = Invoke-Expression "bash -c `"$copyCommand`""
+
+            # Set proper permissions
+            Invoke-Expression "chmod 644 '$path'"
+            
+            # Verify the file
+            if (Test-Path $path) {
+                Write-Host "Successfully processed dashboard: $($dashboard.FileName)" -ForegroundColor Green
+            } else {
+                Write-Warning "Failed to create dashboard file: $($dashboard.FileName)"
+            }
+
+            # Cleanup temp file
+            Remove-Item -Path $tempFile -Force
         }
         catch {
             Write-Error "Error processing dashboard file ($path): $_"
@@ -231,6 +396,17 @@ Function Initialize-Monitoring {
 
     Write-Host "`nDashboard initialization complete. Location: $dashboardPath"
     Write-Host "Total dashboards processed: $($dashboards.Count)"
+
+    # Verify final files
+    Write-Host "`nVerifying files..."
+    Get-ChildItem -Path $dashboardPath -Filter "*.json" | ForEach-Object {
+        $fileContent = Get-Content -Path $_.FullName -Raw -Encoding Byte
+        if ($fileContent[0] -eq 0xEF -and $fileContent[1] -eq 0xBB -and $fileContent[2] -eq 0xBF) {
+            Write-Host "$($_.Name): Has BOM (Problem)" -ForegroundColor Red
+        } else {
+            Write-Host "$($_.Name): No BOM (Good)" -ForegroundColor Green
+        }
+    }
 }
 
 Function Initialize--Monitoring {
