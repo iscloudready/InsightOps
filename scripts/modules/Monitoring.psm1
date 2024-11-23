@@ -149,113 +149,20 @@ Function Initialize-Monitoring {
                 continue
             }
 
-            # Write JSON to file without BOM
-            Set-Content -Path $path -Value $content -Encoding utf8 -Force
+            # Sanitize and clean JSON content
+            $cleanContent = $content -replace "[^\u0000-\u007F]", ''  # Remove invalid characters
+            $cleanContent = $cleanContent.Trim() # Ensure no trailing whitespaces
 
-            Write-Verbose "Successfully saved dashboard: $path"
+            # Write JSON to file without BOM
+            try {
+                [System.IO.File]::WriteAllText($path, $cleanContent, [System.Text.Encoding]::UTF8)
+                Write-Verbose "Successfully saved dashboard: $path"
+            } catch {
+                Write-Error "Error writing to file ($path): $_"
+            }
         } catch {
             Write-Error "Error processing dashboard file ($path): $_"
         }
-    }
-}
-
-Function _Validate-Dashboard {
-    param (
-        [string]$Content,
-        [string]$Schema
-    )
-
-    try {
-        # Load schema and dashboard JSON
-        $schemaJson = ConvertFrom-Json -InputObject $Schema
-        $dashboardJson = ConvertFrom-Json -InputObject $Content
-
-        # Validation logic for matching against the schema (extend as needed)
-        if (-not ($dashboardJson -is [System.Collections.Hashtable])) {
-            Write-Error "Dashboard does not match expected schema format."
-            return $false
-        }
-
-        # Additional validation logic
-        if (-not $dashboardJson.title) {
-            Write-Error "Dashboard title is missing."
-            return $false
-        }
-
-        if (-not $dashboardJson.uid) {
-            Write-Error "Dashboard UID is missing."
-            return $false
-        }
-
-        if (-not $dashboardJson.panels) {
-            Write-Error "Dashboard panels are missing."
-            return $false
-        }
-
-        foreach ($panel in $dashboardJson.panels) {
-            if (-not $panel.title) {
-                Write-Error "Panel title is missing."
-                return $false
-            }
-
-            if (-not $panel.type) {
-                Write-Error "Panel type is missing."
-                return $false
-            }
-
-            if ($panel.type -eq "timeseries") {
-                if (-not $panel.targets) {
-                    Write-Error "Timeseries panel targets are missing."
-                    return $false
-                }
-
-                foreach ($target in $panel.targets) {
-                    if (-not $target.expr) {
-                        Write-Error "Timeseries panel target expression is missing."
-                        return $false
-                    }
-                }
-            }
-        }
-
-        Write-Verbose "Dashboard validated successfully"
-        return $true
-    } catch [System.ArgumentException] {
-        Write-Error "Error parsing dashboard JSON: $($Error[0].Message)"
-        return $false
-    } catch [System.Management.Automation.ParsingException] {
-        Write-Error "Error parsing schema JSON: $($Error[0].Message)"
-        return $false
-    } catch {
-        Write-Error "Unexpected error during validation: $($Error[0].Message)"
-        return $false
-    }
-}
-
-Function _Validate-Dashboard {
-    param (
-        [string]$DashboardPath,
-        [string]$SchemaPath,
-        [string]$Content
-    )
-
-    try {
-        # Load schema and dashboard JSON
-        $schema = Get-Content $SchemaPath -Raw | ConvertFrom-Json
-        $dashboardJson = ConvertFrom-Json -InputObject $Content
-
-        # Validation logic for matching against the schema (extend as needed)
-        if (-not ($dashboardJson -is [System.Collections.Hashtable])) {
-            Write-Error "Dashboard does not match expected schema format."
-            return $false
-        }
-
-        Write-Verbose "Dashboard validated successfully: $DashboardPath"
-        return $true
-    } catch {
-        $errorMessage = $_.Message
-        Write-Error "Validation failed for ${DashboardPath}: $($errorMessage)"
-        return $false
     }
 }
 
