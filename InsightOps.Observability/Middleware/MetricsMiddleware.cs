@@ -1,33 +1,40 @@
-﻿namespace InsightOps.Observability.Middleware
+﻿// InsightOps.Observability/Middleware/MetricsMiddleware.cs
+using Microsoft.AspNetCore.Http;
+using InsightOps.Observability.Metrics;
+using System.Diagnostics;
+
+namespace InsightOps.Observability.Middleware;
+
+public class MetricsMiddleware
 {
-    using InsightOps.Observability.Metrics;
-    using Microsoft.AspNetCore.Http;
-    using System.Diagnostics;
+    private readonly RequestDelegate _next;
+    private readonly RealTimeMetricsCollector _metricsCollector;
 
-    public class MetricsMiddleware
+    public MetricsMiddleware(
+        RequestDelegate next,
+        RealTimeMetricsCollector metricsCollector)
     {
-        private readonly RequestDelegate _next;
-        private readonly RealTimeMetricsCollector _metricsCollector;
+        _next = next;
+        _metricsCollector = metricsCollector;
+    }
 
-        public MetricsMiddleware(RequestDelegate next, RealTimeMetricsCollector metricsCollector)
+    public async Task InvokeAsync(HttpContext context)
+    {
+        var sw = Stopwatch.StartNew();
+        var path = context.Request.Path.Value?.ToLowerInvariant() ?? "";
+
+        try
         {
-            _next = next;
-            _metricsCollector = metricsCollector;
+            _metricsCollector.RecordRequestStarted(path);
+            await _next(context);
         }
-
-        public async Task InvokeAsync(HttpContext context)
+        finally
         {
-            var stopwatch = Stopwatch.StartNew();
-            try
-            {
-                _metricsCollector.RecordApiRequest(context.Request.Path, context.Request.Method);
-                await _next(context);
-            }
-            finally
-            {
-                stopwatch.Stop();
-                _metricsCollector.RecordApiResponse(context.Request.Path, stopwatch.Elapsed.TotalSeconds);
-            }
+            sw.Stop();
+            _metricsCollector.RecordRequestCompleted(
+                path,
+                context.Response.StatusCode,
+                sw.Elapsed.TotalSeconds);
         }
     }
 }

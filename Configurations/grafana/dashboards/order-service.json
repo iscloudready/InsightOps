@@ -1,27 +1,27 @@
 ﻿    {
-        "title": "API Gateway Dashboard",
-        "uid": "api-gateway",
-        "tags": ["api", "gateway"],
+        "title": "Order Service Dashboard",
+        "uid": "order-service",
+        "tags": ["orders", "service"],
         "refresh": "5s",
         "panels": [
             {
-                "title": "Request Rate by Service",
+                "title": "Order Processing Rate",
                 "type": "stat",
                 "datasource": "Prometheus",
                 "targets": [
                     {
-                        "expr": "sum(rate(api_gateway_requests_total[5m])) by (service)"
+                        "expr": "rate(order_service_orders_processed_total[1m])"
                     }
                 ],
-                "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 }
+                "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 }
             },
             {
-                "title": "Gateway Errors",
+                "title": "Failed Orders",
                 "type": "timeseries",
                 "datasource": "Prometheus",
                 "targets": [
                     {
-                        "expr": "sum(rate(api_gateway_errors_total[5m])) by (service)"
+                        "expr": "sum(rate(order_service_failed_orders_total[5m]))"
                     }
                 ],
                 "gridPos": { "h": 8, "w": 16, "x": 8, "y": 0 }

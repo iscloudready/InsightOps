@@ -1,47 +1,76 @@
-﻿namespace InsightOps.Observability.Metrics
+﻿// InsightOps.Observability/Metrics/RealTimeMetricsCollector.cs
+using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
+
+namespace InsightOps.Observability.Metrics;
+
+public class RealTimeMetricsCollector
 {
-    using Microsoft.Extensions.Logging;
-    using System.Collections.Concurrent;
-    using System.Diagnostics;
-    using System.Diagnostics.Metrics;
+    private readonly Meter _meter;
+    private readonly Counter<long> _requestCounter;
+    private readonly Histogram<double> _requestDuration;
+    private readonly Counter<long> _errorCounter;
+    private readonly ConcurrentDictionary<string, RequestMetrics> _endpointMetrics;
 
-    public class RealTimeMetricsCollector
+    public RealTimeMetricsCollector()
     {
-        private readonly ILogger<RealTimeMetricsCollector> _logger;
-        private readonly Meter _meter;
-        private readonly ConcurrentDictionary<string, Counter<long>> _counters;
-        private readonly ConcurrentDictionary<string, Histogram<double>> _histograms;
+        _meter = new Meter("InsightOps.Metrics");
+        _requestCounter = _meter.CreateCounter<long>("http_requests_total");
+        _requestDuration = _meter.CreateHistogram<double>("http_request_duration_seconds");
+        _errorCounter = _meter.CreateCounter<long>("http_request_errors_total");
+        _endpointMetrics = new ConcurrentDictionary<string, RequestMetrics>();
+    }
 
-        public RealTimeMetricsCollector(ILogger<RealTimeMetricsCollector> logger)
+    public void RecordRequestStarted(string path)
+    {
+        var metrics = _endpointMetrics.GetOrAdd(path, _ => new RequestMetrics());
+        _requestCounter.Add(1, new KeyValuePair<string, object?>("path", path));
+        metrics.ActiveRequests++;
+    }
+
+    public void RecordMetric(string metricName, double value)
+    {
+        _meter.CreateObservableGauge(metricName, () => value, "units", "Dynamic metric value");
+    }
+
+    public void RecordRequestCompleted(string path, int statusCode, double duration)
+    {
+        if (_endpointMetrics.TryGetValue(path, out var metrics))
         {
-            _logger = logger;
-            _meter = new Meter("InsightOpsMetrics");
-            _counters = new ConcurrentDictionary<string, Counter<long>>();
-            _histograms = new ConcurrentDictionary<string, Histogram<double>>();
+            metrics.ActiveRequests--;
+            metrics.TotalRequests++;
+            metrics.TotalDuration += duration;
 
-            InitializeMetrics();
-        }
-
-        private void InitializeMetrics()
-        {
-            _counters["api_requests"] = _meter.CreateCounter<long>("api_requests_total", "Total API requests");
-            _histograms["api_response_time"] = _meter.CreateHistogram<double>("api_response_time_seconds", "API response time");
-        }
-
-        public void RecordApiRequest(string endpoint, string method)
-        {
-            if (_counters.TryGetValue("api_requests", out var counter))
+            if (statusCode >= 400)
             {
-                counter.Add(1, new KeyValuePair<string, object?>("endpoint", endpoint));
+                metrics.ErrorCount++;
+                _errorCounter.Add(1, new KeyValuePair<string, object?>("path", path));
             }
+
+            _requestDuration.Record(
+                duration,
+                new KeyValuePair<string, object?>("path", path),
+                new KeyValuePair<string, object?>("status_code", statusCode.ToString()));
         }
 
-        public void RecordApiResponse(string endpoint, double duration)
-        {
-            if (_histograms.TryGetValue("api_response_time", out var histogram))
-            {
-                histogram.Record(duration, new KeyValuePair<string, object?>("endpoint", endpoint));
-            }
-        }
+    }
+
+    public IReadOnlyDictionary<string, RequestMetrics> GetEndpointMetrics()
+    {
+        return _endpointMetrics;
+    }
+
+    public class RequestMetrics
+    {
+        public long ActiveRequests { get; set; }
+        public long TotalRequests { get; set; }
+        public long ErrorCount { get; set; }
+        public double TotalDuration { get; set; }
+
+        public double AverageResponseTime =>
+            TotalRequests > 0 ? TotalDuration / TotalRequests : 0;
+
+        public double ErrorRate =>
+            TotalRequests > 0 ? (double)ErrorCount / TotalRequests : 0;
     }
 }

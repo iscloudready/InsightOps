@@ -1,278 +1,211 @@
-﻿using InsightOps.Observability.Configurations;
-using InsightOps.Observability.HealthChecks;
-using InsightOps.Observability.Metrics;
-using InsightOps.Observability.Middleware;
-using InsightOps.Observability.SignalR;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.Extensions.Configuration;
+﻿// InsightOps.Observability/Extensions/ObservabilityExtensions.cs
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Microsoft.Extensions.Logging;
-using OpenTelemetry.Metrics;
+using Microsoft.Extensions.Configuration;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using OpenTelemetry.Metrics;
 using Serilog;
 using Serilog.Events;
-using System.Diagnostics;
-using System.Text.Json;
+using InsightOps.Observability.Options;
+//using InsightOps.Observability.HealthChecks;
+using OpenTelemetry.Extensions.Hosting;
+using InsightOps.Observability.Metrics;
+using InsightOps.Observability.BackgroundServices;
+using Microsoft.Extensions.Diagnostics.Metrics;
+using Microsoft.Extensions.Logging;
+using OpenTelemetry.Exporter;
+using Serilog.Extensions.Logging;
 
-namespace InsightOps.Observability.Extensions
+namespace InsightOps.Observability.Extensions;
+
+public static class ObservabilityExtensions
 {
-    /// <summary>
-    /// Provides extension methods for setting up observability in an application.
-    /// </summary>
-    public static class ObservabilityExtensions
+    public static IServiceCollection AddInsightOpsObservability(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        string serviceName,
+        Action<ObservabilityOptions>? configureOptions = null)
     {
-        /// <summary>
-        /// Registers all InsightOps observability components: logging, OpenTelemetry, health checks, and metrics.
-        /// </summary>
-        /// <param name="services">The service collection to configure.</param>
-        /// <param name="configuration">The application configuration.</param>
-        /// <param name="serviceName">The name of the service being configured.</param>
-        /// <param name="configureOptions">Optional action to configure additional observability options.</param>
-        public static IServiceCollection AddInsightOpsObservability(
-            this IServiceCollection services,
-            IConfiguration configuration,
-            string serviceName,
-            Action<ObservabilityOptions>? configureOptions = null)
+        // Load and validate configuration
+        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Development";
+        var options = new ObservabilityOptions();
+        configuration.GetSection("Observability").Bind(options);
+        configureOptions?.Invoke(options);
+
+        var envOptions = environment == "Development" ? options.Development : options.Docker;
+
+        if (!Enum.TryParse<AppEnvironment>(environment, true, out var parsedEnvironment))
         {
-            var options = new ObservabilityOptions();
-            configureOptions?.Invoke(options);
-
-            // Configure logging, tracing, and health checks
-            AddLogging(services, configuration, serviceName, options);
-            AddOpenTelemetry(services, configuration, serviceName, options);
-            AddHealthChecks(services, options);
-
-            return services;
+            parsedEnvironment = AppEnvironment.Development; // Default if parsing fails
         }
 
-        /// <summary>
-        /// Configures Serilog for structured logging with Loki and console output.
-        /// </summary>
-        private static void AddLogging(
-            IServiceCollection services,
-            IConfiguration configuration,
-            string serviceName,
-            ObservabilityOptions options)
+        options.Common.ServiceName = serviceName;
+        options.Common.Environment = parsedEnvironment;
+
+        // Register options
+        services.Configure<ObservabilityOptions>(opt =>
         {
-            // Get Loki URL from options or configuration
-            var lokiUrl = options.LokiUrl ?? configuration["Observability:LokiUrl"] ?? "http://loki:3100";
+            opt = options;
+        });
 
-            // Validate the Loki URL
-            if (!Uri.IsWellFormedUriString(lokiUrl, UriKind.Absolute))
+        // Configure OpenTelemetry
+        ConfigureOpenTelemetry(services, envOptions, options.Common);
+
+        // Configure Serilog
+        ConfigureSerilog(services, envOptions, options.Common);
+
+        // Configure Metrics Collection
+        ConfigureMetrics(services, options.Common);
+
+        // Configure Health Checks
+        ConfigureHealthChecks(services, envOptions);
+
+        return services;
+    }
+
+    private static void ConfigureOpenTelemetry(
+        IServiceCollection services,
+        EnvironmentOptions envOptions,
+        CommonOptions commonOptions)
+    {
+        services.AddOpenTelemetry()
+            .WithTracing(builder =>
             {
-                throw new ArgumentException($"Invalid Loki URL: {lokiUrl}");
-            }
-
-            // Configure Serilog for structured logging
-            var loggerConfig = new LoggerConfiguration()
-                .ReadFrom.Configuration(configuration)
-                .MinimumLevel.Information()
-                .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
-                .MinimumLevel.Override("System", LogEventLevel.Warning)
-                .Enrich.FromLogContext()
-                .Enrich.WithProperty("Service", serviceName)
-                .Enrich.WithProperty("Environment", Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"))
-                .Enrich.WithProperty("TraceId", Activity.Current?.Id ?? "")
-                .WriteTo.Console(
-                    outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} {Properties}{NewLine}{Exception}")
-                .WriteTo.Http($"{lokiUrl}/loki/api/v1/push", queueLimitBytes: null);
-
-            // Enable debug logging if configured
-            if (options.EnableDebugLogging)
-            {
-                loggerConfig.MinimumLevel.Debug();
-            }
-
-            Log.Logger = loggerConfig.CreateLogger();
-
-            services.AddLogging(loggingBuilder =>
-            {
-                loggingBuilder.ClearProviders();
-                loggingBuilder.AddSerilog(dispose: true);
-            });
-        }
-
-        /// <summary>
-        /// Configures OpenTelemetry for tracing and metrics instrumentation.
-        /// </summary>
-        private static void AddOpenTelemetry(
-            IServiceCollection services,
-            IConfiguration configuration,
-            string serviceName,
-            ObservabilityOptions options)
-        {
-            var tempoEndpoint = options.TempoEndpoint ?? configuration["Observability:Tempo:OtlpEndpoint"] ?? "http://tempo:4317";
-
-            // Validate the Tempo endpoint
-            if (!Uri.IsWellFormedUriString(tempoEndpoint, UriKind.Absolute))
-            {
-                throw new ArgumentException($"Invalid Tempo Endpoint: {tempoEndpoint}");
-            }
-
-            // Configure tracing and metrics
-            services.AddOpenTelemetry()
-                .WithTracing(builder =>
-                {
-                    builder
-                        .AddSource(serviceName)
-                        .AddAspNetCoreInstrumentation(opts =>
-                        {
-                            opts.RecordException = true;
-                            opts.EnrichWithHttpRequest = (activity, request) =>
+                builder
+                    .AddAspNetCoreInstrumentation()
+                    .AddHttpClientInstrumentation()
+                    .AddOtlpExporter(options =>
+                    {
+                        options.Endpoint = new Uri(envOptions.Infrastructure.TempoEndpoint);
+                    })
+                    .SetResourceBuilder(
+                        ResourceBuilder.CreateDefault()
+                            .AddService(commonOptions.ServiceName)
+                            .AddTelemetrySdk()
+                            .AddAttributes(new Dictionary<string, object>
                             {
-                                activity.SetTag("http.request.headers", string.Join(",", request.Headers.Select(h => $"{h.Key}={h.Value}")));
-                            };
-                        })
-                        .AddHttpClientInstrumentation(opts =>
-                        {
-                            opts.RecordException = true;
-                        })
-                        .AddOtlpExporter(opts =>
-                        {
-                            opts.Endpoint = new Uri(tempoEndpoint);
-                        })
-                        .SetResourceBuilder(
-                            ResourceBuilder.CreateDefault()
-                                .AddService(serviceName)
-                                .AddTelemetrySdk()
-                                .AddEnvironmentVariableDetector());
-                })
-                .WithMetrics(builder =>
-                {
-                    builder
-                        .AddAspNetCoreInstrumentation()
-                        .AddHttpClientInstrumentation()
-                        .AddRuntimeInstrumentation()
-                        .AddPrometheusExporter(opts =>
-                        {
-                            opts.ScrapeEndpointPath = options.MetricsEndpoint ?? "/metrics";
-                        });
-                });
-        }
-
-        /// <summary>
-        /// Registers dynamic health checks based on service endpoints.
-        /// </summary>
-        public static void AddDynamicHealthChecks(this IServiceCollection services, IEnumerable<string> serviceEndpoints)
-        {
-            services.AddHealthChecks().AddCheck<DynamicHealthCheck>("dynamic_health_check", tags: serviceEndpoints.ToList());
-        }
-
-        /// <summary>
-        /// Registers the RealTimeMetricsCollector for API metrics tracking.
-        /// </summary>
-        public static IServiceCollection AddMetricsCollector(this IServiceCollection services)
-        {
-            services.AddSingleton<RealTimeMetricsCollector>();
-            return services;
-        }
-
-        /// <summary>
-        /// Configures SignalR for real-time metrics broadcasting.
-        /// </summary>
-        public static IServiceCollection AddMetricsHub(this IServiceCollection services)
-        {
-            services.AddSignalR(options =>
+                                ["environment"] = commonOptions.Environment,
+                                ["service.version"] = GetServiceVersion()
+                            }));
+            })
+            .WithMetrics(builder =>
             {
-                options.EnableDetailedErrors = true;
-                options.MaximumReceiveMessageSize = 102400;
-            });
-            services.AddSingleton<MetricsHub>();
-            return services;
-        }
-
-        /// <summary>
-        /// Configures default monitoring options from configuration.
-        /// </summary>
-        public static IServiceCollection AddMonitoringOptions(this IServiceCollection services, IConfiguration configuration)
-        {
-            services.Configure<MonitoringOptions>(options =>
-            {
-                options.MetricsInterval = TimeSpan.FromSeconds(int.Parse(configuration["Monitoring:MetricsInterval"] ?? "10"));
-                options.RetentionDays = int.Parse(configuration["Monitoring:RetentionDays"] ?? "7");
-                options.EnableDetailedMetrics = bool.Parse(configuration["Monitoring:EnableDetailedMetrics"] ?? "true");
+                builder
+                    .AddAspNetCoreInstrumentation()
+                    .AddHttpClientInstrumentation()
+                    .AddRuntimeInstrumentation()
+                    .AddPrometheusExporter((PrometheusExporterOptions options) =>
+                    {
+                        options.ScrapeEndpointPath = commonOptions.MetricsEndpoint;
+                    });
             });
 
-            return services;
+    }
+
+    private static void ConfigureSerilog(
+        IServiceCollection services,
+        EnvironmentOptions envOptions,
+        CommonOptions commonOptions)
+    {
+        // Build the Serilog logger
+        var loggerConfig = new LoggerConfiguration()
+            .MinimumLevel.Information()
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+            .MinimumLevel.Override("System", LogEventLevel.Warning)
+            .Enrich.FromLogContext()
+            .Enrich.WithProperty("service", commonOptions.ServiceName)
+            .Enrich.WithProperty("environment", commonOptions.Environment)
+            .WriteTo.Console(
+                outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} {Properties}{NewLine}{Exception}")
+            .WriteTo.Http(
+                requestUri: $"{envOptions.Infrastructure.LokiUrl}/loki/api/v1/push",
+                queueLimitBytes: null);
+
+        if (commonOptions.EnableDetailedMetrics)
+        {
+            loggerConfig.MinimumLevel.Debug();
         }
 
-        /// <summary>
-        /// Adds custom middleware for tracking API request and response metrics.
-        /// </summary>
-        public static IApplicationBuilder UseMetricsMiddleware(this IApplicationBuilder app)
+        Log.Logger = loggerConfig.CreateLogger();
+
+        // Add Serilog as the logging provider
+        services.AddSingleton<ILoggerFactory>(sp => new SerilogLoggerFactory(Log.Logger));
+        services.AddLogging(builder =>
         {
-            app.UseMiddleware<MetricsMiddleware>();
-            return app;
-        }
+            builder.ClearProviders(); // Remove default providers
+            builder.AddSerilog(Log.Logger, dispose: true);
+        });
+    }
 
-        /// <summary>
-        /// Configures health checks and adds any additional health check registrations.
-        /// </summary>
-        private static void AddHealthChecks(IServiceCollection services, ObservabilityOptions options)
+
+    private static void ConfigureMetrics(
+        IServiceCollection services,
+        CommonOptions commonOptions)
+    {
+        services.AddSingleton<RealTimeMetricsCollector>();
+        services.AddSingleton<SystemMetricsCollector>();
+        services.AddHostedService<MetricsBackgroundService>();
+
+        services.Configure<Options.MetricsOptions>(options =>
         {
-            var healthChecks = services.AddHealthChecks();
+            options.Interval = TimeSpan.FromSeconds(commonOptions.MetricsInterval);
+            options.RetentionDays = commonOptions.RetentionDays;
+            options.EnableDetailedMetrics = commonOptions.EnableDetailedMetrics;
+        });
+    }
 
-            // Default "self" health check
-            healthChecks.AddCheck("self", () => HealthCheckResult.Healthy());
+    private static void ConfigureHealthChecks(
+        IServiceCollection services,
+        EnvironmentOptions envOptions)
+    {
+        var healthChecks = services.AddHealthChecks();
 
-            // Add additional health checks if specified
-            foreach (var check in options.AdditionalHealthChecks)
-            {
-                healthChecks.Add(check);
-            }
-        }
+        // Add infrastructure health checks
+        healthChecks
+            .AddUrlGroup(
+                new Uri($"{envOptions.Infrastructure.PrometheusEndpoint}/-/healthy"),
+                name: "prometheus",
+                tags: new[] { "infrastructure" })
+            .AddUrlGroup(
+                new Uri($"{envOptions.Infrastructure.LokiUrl}/ready"),
+                name: "loki",
+                tags: new[] { "infrastructure" })
+            .AddUrlGroup(
+                new Uri($"{envOptions.Infrastructure.TempoEndpoint}/ready"),
+                name: "tempo",
+                tags: new[] { "infrastructure" });
 
-        /// <summary>
-        /// Configures middleware and endpoints for InsightOps observability.
-        /// </summary>
-        public static IApplicationBuilder UseInsightOpsObservability(this IApplicationBuilder app)
+        // Add service health checks
+        foreach (var service in GetServiceEndpoints(envOptions.Services))
         {
-            app.UseSerilogRequestLogging(opts =>
-            {
-                opts.MessageTemplate = "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
-            });
-
-            app.UseHealthChecks("/health", new HealthCheckOptions
-            {
-                ResponseWriter = async (context, report) =>
-                {
-                    context.Response.ContentType = "application/json";
-                    await JsonSerializer.SerializeAsync(
-                        context.Response.Body,
-                        new
-                        {
-                            status = report.Status.ToString(),
-                            checks = report.Entries.Select(e => new
-                            {
-                                name = e.Key,
-                                status = e.Value.Status.ToString(),
-                                description = e.Value.Description
-                            })
-                        });
-                }
-            });
-
-            app.UseEndpoints(endpoints =>
-            {
-                endpoints.MapPrometheusScrapingEndpoint("/metrics");
-            });
-
-            return app;
+            healthChecks.AddUrlGroup(
+                new Uri($"{service.Value}/health"),
+                name: service.Key.ToLowerInvariant(),
+                tags: new[] { "service" });
         }
     }
 
-    /// <summary>
-    /// Configuration options for InsightOps observability.
-    /// </summary>
-    public class ObservabilityOptions
+    private static string GetServiceVersion()
     {
-        public string? LokiUrl { get; set; }
-        public string? TempoEndpoint { get; set; }
-        public string? MetricsEndpoint { get; set; }
-        public bool EnableDebugLogging { get; set; }
-        public List<HealthCheckRegistration> AdditionalHealthChecks { get; set; } = new();
+        try
+        {
+            return typeof(ObservabilityExtensions).Assembly.GetName().Version?.ToString()
+                   ?? "1.0.0";
+        }
+        catch
+        {
+            return "1.0.0";
+        }
+    }
+
+    private static Dictionary<string, string> GetServiceEndpoints(ServiceEndpoints endpoints)
+    {
+        return new Dictionary<string, string>
+        {
+            { "ApiGateway", endpoints.ApiGateway },
+            { "OrderService", endpoints.OrderService },
+            { "InventoryService", endpoints.InventoryService }
+        };
     }
 }
+

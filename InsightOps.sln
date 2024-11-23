@@ -45,8 +45,9 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Modules", "Modules", "{97D3
 		scripts\modules\Core.psm1 = scripts\modules\Core.psm1
 		scripts\modules\DockerOperations.psm1 = scripts\modules\DockerOperations.psm1
 		scripts\modules\EnvironmentSetup.psm1 = scripts\modules\EnvironmentSetup.psm1
+		scripts\modules\K8sOperations.psm1 = scripts\modules\K8sOperations.psm1
 		scripts\modules\Logging.psm1 = scripts\modules\Logging.psm1
-		Monitoring.psm1 = Monitoring.psm1
+		scripts\modules\Monitoring.psm1 = scripts\modules\Monitoring.psm1
 		scripts\modules\Prerequisites.psm1 = scripts\modules\Prerequisites.psm1
 		scripts\modules\Utilities.psm1 = scripts\modules\Utilities.psm1
 	EndProjectSection
