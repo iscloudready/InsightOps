@@ -1,0 +1,192 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Order Events",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "title": "Order Service Pro Dashboard",
+  "uid": "order-service-pro",
+  "tags": ["orders", "service", "pro"],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "title": "Order Processing Status",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 90 },
+              { "color": "green", "value": 95 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(order_processing_success_total[5m])) / sum(rate(order_processing_total[5m])) * 100",
+          "legendFormat": "Success Rate"
+        }
+      ]
+    },
+    {
+      "title": "Order Flow Analysis",
+      "type": "nodeGraph",
+      "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(order_stage_duration_seconds_count[5m])) by (from_stage, to_stage)",
+          "legendFormat": "{{from_stage}} -> {{to_stage}}"
+        }
+      ]
+    },
+    {
+      "title": "Order Processing Time",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(order_processing_duration_seconds_bucket[5m])) by (le, type))",
+          "legendFormat": "{{type}} - P95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(order_processing_duration_seconds_bucket[5m])) by (le, type))",
+          "legendFormat": "{{type}} - P99"
+        }
+      ],
+      "alert": {
+        "name": "High Processing Time",
+        "conditions": [
+          {
+            "type": "query",
+            "query": { "params": ["A", "5m", "now"] },
+            "reducer": { "type": "avg" },
+            "evaluator": { "type": "gt", "params": [30] }
+          }
+        ]
+      }
+    },
+    {
+      "title": "Order Volume by Region",
+      "type": "worldmap-panel",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(orders_total[5m])) by (region)",
+          "legendFormat": "{{region}}"
+        }
+      ]
+    },
+    {
+      "title": "Payment Methods Distribution",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "datasource": "Prometheus",
+      "options": {
+        "legend": {
+          "placement": "right",
+          "values": ["value", "percent"]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(order_payment_method_total) by (method)",
+          "legendFormat": "{{method}}"
+        }
+      ]
+    },
+    {
+      "title": "Order Status Distribution",
+      "type": "bargauge",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(orders_by_status) by (status)",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "title": "Failed Orders Analysis",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, sum(rate(order_failures_total[5m])) by (reason, stage))",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "type": "organize",
+          "config": {
+            "indexByName": {},
+            "renameByName": {
+              "reason": "Failure Reason",
+              "stage": "Processing Stage",
+              "Value": "Count"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "region",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(orders_total, region)",
+        "refresh": 2
+      },
+      {
+        "name": "payment_method",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(order_payment_method_total, method)",
+        "refresh": 2
+      },
+      {
+        "name": "order_type",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(order_processing_duration_seconds_bucket, type)",
+        "refresh": 2
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  }
+}

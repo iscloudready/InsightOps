@@ -1,0 +1,204 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Frontend Events",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "title": "Frontend Service Pro Dashboard",
+  "uid": "frontend-service-pro",
+  "tags": ["frontend", "service", "pro"],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "title": "User Activity Overview",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 5000 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(frontend_active_sessions)",
+          "legendFormat": "Active Users"
+        }
+      ]
+    },
+    {
+      "title": "Geographic Distribution",
+      "type": "geomap",
+      "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(frontend_sessions_by_region) by (region)",
+          "legendFormat": "{{region}}"
+        }
+      ]
+    },
+    {
+      "title": "Performance Metrics",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(frontend_page_load_time_bucket[5m])) by (le, page))",
+          "legendFormat": "{{page}} - P95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(frontend_page_load_time_bucket[5m])) by (le, page))",
+          "legendFormat": "{{page}} - P99"
+        }
+      ],
+      "alert": {
+        "name": "High Page Load Time",
+        "conditions": [
+          {
+            "type": "query",
+            "query": { "params": ["A", "5m", "now"] },
+            "reducer": { "type": "avg" },
+            "evaluator": { "type": "gt", "params": [3] }
+          }
+        ]
+      }
+    },
+    {
+      "title": "Error Analysis",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(frontend_error_total[5m])) by (type, code)",
+          "legendFormat": "{{type}} - {{code}}"
+        }
+      ]
+    },
+    {
+      "title": "User Journey Funnel",
+      "type": "barchart",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(frontend_user_journey_stage) by (stage)",
+          "legendFormat": "{{stage}}"
+        }
+      ]
+    },
+    {
+      "title": "Browser Distribution",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "datasource": "Prometheus",
+      "options": {
+        "legend": {
+          "placement": "right",
+          "values": ["value", "percent"]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(frontend_browser_usage) by (browser)",
+          "legendFormat": "{{browser}}"
+        }
+      ]
+    },
+    {
+      "title": "Resource Loading",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(frontend_resource_load_time_sum[5m])) by (resource_type) / sum(rate(frontend_resource_load_time_count[5m])) by (resource_type)",
+          "legendFormat": "{{resource_type}}"
+        }
+      ]
+    },
+    {
+      "title": "API Interactions",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 32},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, sum(rate(frontend_api_calls_total[5m])) by (endpoint))",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "type": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Value",
+                "order": "desc"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "page",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(frontend_page_load_time_bucket, page)",
+        "refresh": 2
+      },
+      {
+        "name": "browser",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(frontend_browser_usage, browser)",
+        "refresh": 2
+      },
+      {
+        "name": "region",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(frontend_sessions_by_region, region)",
+        "refresh": 2
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  }
+}

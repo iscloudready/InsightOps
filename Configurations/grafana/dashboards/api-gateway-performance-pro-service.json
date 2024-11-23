@@ -1,0 +1,100 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Performance Events",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "title": "API Gateway Performance Pro Dashboard",
+  "uid": "api-gateway-performance-pro",
+  "tags": ["api", "gateway", "performance", "pro"],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "title": "Gateway Latency",
+      "type": "gauge",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "red", "value": 200 }
+            ]
+          },
+          "unit": "ms"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_request_duration_ms_bucket[5m])) by (le))",
+          "legendFormat": "P95 Latency"
+        }
+      ]
+    },
+    {
+      "title": "Response Time Distribution",
+      "type": "heatmap",
+      "gridPos": {"h": 8, "w": 18, "x": 6, "y": 0},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(gateway_request_duration_ms_bucket[5m])) by (le, endpoint)",
+          "format": "heatmap"
+        }
+      ]
+    },
+    {
+      "title": "Resource Utilization",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(process_cpu_seconds_total{job=\"api-gateway\"}[5m])",
+          "legendFormat": "CPU Usage"
+        },
+        {
+          "expr": "process_resident_memory_bytes{job=\"api-gateway\"}",
+          "legendFormat": "Memory Usage"
+        }
+      ]
+    },
+    {
+      "title": "Throughput Analysis",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(gateway_requests_total[5m])) by (endpoint)",
+          "legendFormat": "{{endpoint}}"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "endpoint",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(gateway_requests_total, endpoint)",
+        "refresh": 1,
+        "includeAll": true
+      }
+    ]
+  }
+}

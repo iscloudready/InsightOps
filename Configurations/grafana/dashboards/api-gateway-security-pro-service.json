@@ -1,0 +1,128 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(255, 96, 96, 1)",
+        "name": "Security Events",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "title": "API Gateway Security Pro Dashboard",
+  "uid": "api-gateway-security-pro",
+  "tags": ["api", "gateway", "security", "pro"],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "title": "Authentication Status",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": "Prometheus",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(gateway_auth_success_total[5m])) / sum(rate(gateway_auth_total[5m])) * 100",
+          "legendFormat": "Auth Success Rate"
+        }
+      ]
+    },
+    {
+      "title": "Authentication Failures",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 8, "x": 6, "y": 0},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(gateway_auth_failure_total[5m])) by (reason)",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "alert": {
+        "name": "High Auth Failure Rate",
+        "conditions": [
+          {
+            "type": "query",
+            "query": { "params": ["A", "5m", "now"] },
+            "reducer": { "type": "max" },
+            "evaluator": { "type": "gt", "params": [50] }
+          }
+        ]
+      }
+    },
+    {
+      "title": "JWT Token Stats",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 10, "x": 14, "y": 0},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(gateway_jwt_validation_total[5m])",
+          "legendFormat": "Validations"
+        },
+        {
+          "expr": "rate(gateway_jwt_validation_failed_total[5m])",
+          "legendFormat": "Failures"
+        }
+      ]
+    },
+    {
+      "title": "Rate Limiting",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(gateway_rate_limit_exceeded_total[5m])) by (endpoint)",
+          "legendFormat": "{{endpoint}}"
+        }
+      ]
+    },
+    {
+      "title": "Suspicious IPs",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, sum(rate(gateway_blocked_requests_total[5m])) by (client_ip))",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "type": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Value",
+                "order": "desc"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "endpoint",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(gateway_requests_total, endpoint)",
+        "refresh": 1,
+        "includeAll": true
+      }
+    ]
+  }
+}

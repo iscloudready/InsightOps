@@ -1,0 +1,125 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Routing Events",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "title": "API Gateway Routing Pro Dashboard",
+  "uid": "api-gateway-routing-pro",
+  "tags": ["api", "gateway", "routing", "pro"],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "title": "Route Status Overview",
+      "type": "statusmap",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "gateway_route_status",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "title": "Route Success Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(gateway_route_success_total[5m])) by (route) / sum(rate(gateway_route_requests_total[5m])) by (route) * 100",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "title": "Route Latency",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gateway_route_duration_seconds_bucket[5m])) by (le, route))",
+          "legendFormat": "{{route}} P95"
+        }
+      ],
+      "alert": {
+        "name": "High Route Latency",
+        "conditions": [
+          {
+            "type": "query",
+            "query": { "params": ["A", "5m", "now"] },
+            "reducer": { "type": "max" },
+            "evaluator": { "type": "gt", "params": [1] }
+          }
+        ]
+      }
+    },
+    {
+      "title": "Route Traffic Distribution",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "datasource": "Prometheus",
+      "options": {
+        "legend": {
+          "placement": "right",
+          "values": ["value", "percent"]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(gateway_route_requests_total[5m])) by (route)",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "title": "Failed Routes",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, sum(rate(gateway_route_errors_total[5m])) by (route, error_type))",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "type": "organize",
+          "config": {
+            "indexByName": {},
+            "renameByName": {
+              "route": "Route",
+              "error_type": "Error Type",
+              "Value": "Error Rate"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "route",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(gateway_route_requests_total, route)",
+        "refresh": 1,
+        "includeAll": true
+      }
+    ]
+  }
+}

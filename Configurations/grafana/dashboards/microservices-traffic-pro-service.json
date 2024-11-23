@@ -1,0 +1,182 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Traffic Events",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "title": "Microservices Traffic Pro Dashboard",
+  "uid": "microservices-traffic-pro",
+  "tags": ["microservices", "traffic", "pro"],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "title": "Request Rate Overview",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{service=~\"$service\"}[5m]))",
+          "legendFormat": "Total RPS"
+        }
+      ]
+    },
+    {
+      "title": "Traffic Distribution by Service",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 8, "x": 6, "y": 0},
+      "datasource": "Prometheus",
+      "options": {
+        "legend": {
+          "placement": "right",
+          "values": ["value", "percent"]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{service=~\"$service\"}[5m])) by (service)",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "title": "Traffic Flow Visualization",
+      "type": "nodeGraph",
+      "gridPos": {"h": 8, "w": 10, "x": 14, "y": 0},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{service=~\"$service\"}[5m])) by (source_service, destination_service)",
+          "legendFormat": "{{source_service}} -> {{destination_service}}"
+        }
+      ]
+    },
+    {
+      "title": "Request Rate by Method",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{service=~\"$service\"}[5m])) by (method)",
+          "legendFormat": "{{method}}"
+        }
+      ]
+    },
+    {
+      "title": "Status Code Distribution",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{service=~\"$service\"}[5m])) by (status)",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "alert": {
+        "name": "High Error Rate",
+        "conditions": [
+          {
+            "type": "query",
+            "query": { "params": ["A", "5m", "now"] },
+            "reducer": { "type": "sum" },
+            "evaluator": { "type": "gt", "params": [100] }
+          }
+        ]
+      }
+    },
+    {
+      "title": "Top Endpoints",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, sum(rate(http_requests_total{service=~\"$service\"}[5m])) by (endpoint))",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "type": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Value",
+                "order": "desc"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "title": "Network Traffic Volume",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(network_receive_bytes_total{service=~\"$service\"}[5m])) by (service)",
+          "legendFormat": "{{service}} - Received"
+        },
+        {
+          "expr": "sum(rate(network_transmit_bytes_total{service=~\"$service\"}[5m])) by (service)",
+          "legendFormat": "{{service}} - Transmitted"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(up, service)",
+        "refresh": 1,
+        "includeAll": true
+      },
+      {
+        "name": "status_code",
+        "type": "custom",
+        "query": "200,400,401,403,404,500,502,503,504",
+        "current": {
+          "selected": true,
+          "text": "500",
+          "value": "500"
+        }
+      }
+    ]
+  }
+}

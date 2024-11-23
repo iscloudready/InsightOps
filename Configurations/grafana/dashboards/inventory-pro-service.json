@@ -1,0 +1,206 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Inventory Events",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "title": "Inventory Service Pro Dashboard",
+  "uid": "inventory-service-pro",
+  "tags": ["inventory", "service", "pro"],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "title": "Stock Level Overview",
+      "type": "gauge",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "green", "value": 80 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "avg(inventory_stock_level_percentage)",
+          "legendFormat": "Stock Level"
+        }
+      ]
+    },
+    {
+      "title": "Low Stock Items",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "inventory_stock_level < inventory_reorder_point",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "type": "organize",
+          "config": {
+            "indexByName": {},
+            "renameByName": {
+              "item": "Item",
+              "stock_level": "Current Stock",
+              "reorder_point": "Reorder Point"
+            }
+          }
+        }
+      ],
+      "alert": {
+        "name": "Critical Stock Level",
+        "frequency": "5m",
+        "conditions": [
+          {
+            "type": "query",
+            "query": { "params": ["A", "5m", "now"] },
+            "reducer": { "type": "count" },
+            "evaluator": { "type": "gt", "params": [10] }
+          }
+        ]
+      }
+    },
+    {
+      "title": "Stock Movement Trends",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(inventory_stock_movement_total[5m])) by (direction)",
+          "legendFormat": "{{direction}}"
+        }
+      ]
+    },
+    {
+      "title": "Warehouse Capacity",
+      "type": "bargauge",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "percentage",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "(sum(inventory_used_space) by (warehouse) / sum(inventory_total_space) by (warehouse)) * 100",
+          "legendFormat": "{{warehouse}}"
+        }
+      ]
+    },
+    {
+      "title": "Stock Value Distribution",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "datasource": "Prometheus",
+      "options": {
+        "legend": {
+          "placement": "right",
+          "values": ["value", "percent"]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(inventory_stock_value) by (category)",
+          "legendFormat": "{{category}}"
+        }
+      ]
+    },
+    {
+      "title": "Inventory Turnover",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(inventory_items_sold_total[7d]) / avg_over_time(inventory_stock_level[7d])",
+          "legendFormat": "Turnover Rate"
+        }
+      ]
+    },
+    {
+      "title": "Stock Accuracy",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 24},
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.95 },
+              { "color": "green", "value": 0.98 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(inventory_actual_count) / sum(inventory_expected_count)",
+          "legendFormat": "Accuracy"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "warehouse",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(inventory_used_space, warehouse)",
+        "refresh": 2
+      },
+      {
+        "name": "category",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(inventory_stock_value, category)",
+        "refresh": 2
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(255, 96, 96, 1)",
+        "name": "Log Events",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "title": "Docker Logs Pro Dashboard",
+  "uid": "docker-logs-pro",
+  "tags": ["docker", "logs", "pro"],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "title": "Log Volume Overview",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": "Loki",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({container=~\"$container\"} [5m]))",
+          "legendFormat": "Log Rate"
+        }
+      ]
+    },
+    {
+      "title": "Log Level Distribution",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 8, "x": 6, "y": 0},
+      "datasource": "Loki",
+      "options": {
+        "legend": {
+          "placement": "right",
+          "values": ["value", "percent"]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({container=~\"$container\"} |= \"error\" [5m])) by (level)",
+          "legendFormat": "{{level}}"
+        }
+      ]
+    },
+    {
+      "title": "Error Trends",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 10, "x": 14, "y": 0},
+      "datasource": "Loki",
+      "targets": [
+        {
+          "expr": "sum(count_over_time({container=~\"$container\"} |= \"error\" [5m])) by (container)",
+          "legendFormat": "{{container}}"
+        }
+      ],
+      "alert": {
+        "name": "High Error Rate",
+        "conditions": [
+          {
+            "type": "query",
+            "query": { "params": ["A", "5m", "now"] },
+            "reducer": { "type": "max" },
+            "evaluator": { "type": "gt", "params": [100] }
+          }
+        ]
+      }
+    },
+    {
+      "title": "Log Patterns",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+      "datasource": "Loki",
+      "targets": [
+        {
+          "expr": "topk(10, sum(count_over_time({container=~\"$container\"} [5m])) by (pattern))",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "type": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Value",
+                "order": "desc"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "title": "Live Log Stream",
+      "type": "logs",
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 16},
+      "datasource": "Loki",
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true
+      },
+      "targets": [
+        {
+          "expr": "{container=~\"$container\"} |~ \"$search\"",
+          "legendFormat": "{{container}}"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "container",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(container)",
+        "refresh": 1,
+        "includeAll": true
+      },
+      {
+        "name": "search",
+        "type": "textbox",
+        "label": "Search",
+        "current": {
+          "value": "error|warn|exception"
+        }
+      }
+    ]
+  }
+}
