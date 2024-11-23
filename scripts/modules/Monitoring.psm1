@@ -26,7 +26,12 @@ function Initialize-Monitoring {
     foreach ($dashboard in $dashboards) {
         $path = Join-Path $dashboardPath $dashboard.FileName
         $content = $dashboard.Content
-        Set-Content -Path $path -Value $content -Encoding UTF8
+
+        try {
+            Set-Content -Path $path -Value $content -Encoding UTF8
+        } catch {
+            Write-Error "Error saving dashboard file: $path"
+        }
     }
 }
 
