@@ -1,30 +1,41 @@
-﻿    {
-        "title": "API Gateway Dashboard",
-        "uid": "api-gateway",
-        "tags": ["api", "gateway"],
-        "refresh": "5s",
-        "panels": [
-            {
-                "title": "Request Rate by Service",
-                "type": "stat",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "sum(rate(api_gateway_requests_total[5m])) by (service)"
-                    }
-                ],
-                "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 }
-            },
-            {
-                "title": "Gateway Errors",
-                "type": "timeseries",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "sum(rate(api_gateway_errors_total[5m])) by (service)"
-                    }
-                ],
-                "gridPos": { "h": 8, "w": 16, "x": 8, "y": 0 }
+﻿{
+    "title": "API Gateway Dashboard",
+    "uid": "api-gateway",
+    "tags": ["api", "gateway"],
+    "refresh": "5s",
+    "panels": [
+        {
+            "title": "Request Rate by Service",
+            "type": "stat",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(rate(api_gateway_requests_total[5m])) by (service)"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 0,
+                "y": 0
             }
-        ]
-    }
+        },
+
+        {
+            "title": "Gateway Errors",
+            "type": "timeseries",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(rate(api_gateway_errors_total[5m])) by (service)"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 16,
+                "x": 8,
+                "y": 0
+            }
+        }
+    ]
+}

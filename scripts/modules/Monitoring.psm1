@@ -28,7 +28,8 @@ function Initialize-Monitoring {
         $content = $dashboard.Content
 
         try {
-            Set-Content -Path $path -Value $content -Encoding UTF8
+            $Utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($path, $content, $Utf8NoBomEncoding)
         } catch {
             Write-Error "Error saving dashboard file: $path"
         }
@@ -45,6 +46,15 @@ function Validate-Dashboard {
         # Load schema and dashboard JSON
         $schema = Get-Content $SchemaPath -Raw | ConvertFrom-Json
         $dashboard = Get-Content $DashboardPath -Raw | ConvertFrom-Json
+
+        # Check encoding
+        $encoding = (Get-Content $DashboardPath -Encoding Byte -TotalCount 3) -join '-'
+        if ($encoding -ne '239-187-191') { # UTF-8 BOM
+            Write-Warning "Dashboard file is not encoded in UTF-8 with BOM: $DashboardPath"
+        }
+
+        # Remove invisible characters
+        $dashboard = $dashboard | ForEach-Object { $_.Replace([char]160, ' ') }
 
         # Check validation
         if ($dashboard -is $schema) {
@@ -381,167 +391,219 @@ function Get-ApiGatewayDashboard {
 }
 
 # Dashboard Functions (Professional Dashboards)
-
 function Get-FrontendServiceDashboard {
-    return @'
-    {
-        "title": "Frontend Service Dashboard",
-        "uid": "frontend-service",
-        "tags": ["frontend", "service"],
-        "refresh": "5s",
-        "panels": [
-            {
-                "title": "Active Users",
-                "type": "gauge",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "sum(frontend_active_sessions)"
-                    }
-                ],
-                "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 }
-            },
-            {
-                "title": "Page Load Times (95th Percentile)",
-                "type": "timeseries",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "frontend_page_load_time_seconds{quantile=\"0.95\"}"
-                    }
-                ],
-                "gridPos": { "h": 8, "w": 16, "x": 8, "y": 0 }
-            },
-            {
-                "title": "Session Errors",
-                "type": "stat",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "sum(rate(frontend_session_errors_total[5m]))"
-                    }
-                ],
-                "gridPos": { "h": 4, "w": 8, "x": 0, "y": 8 }
-            },
-            {
-                "title": "Latency by API Endpoint",
-                "type": "bar",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "histogram_quantile(0.95, rate(api_request_duration_seconds_bucket[5m])) by (endpoint)"
-                    }
-                ],
-                "gridPos": { "h": 8, "w": 16, "x": 0, "y": 12 }
+    return @"
+{
+    "title": "Frontend Service Dashboard",
+    "uid": "frontend-service",
+    "tags": ["frontend", "service"],
+    "refresh": "5s",
+    "panels": [
+        {
+            "title": "Active Users",
+            "type": "gauge",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(frontend_active_sessions)"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 0,
+                "y": 0
             }
-        ]
-    }
-'@
+        },
+        {
+            "title": "Page Load Times (95th Percentile)",
+            "type": "timeseries",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "frontend_page_load_time_seconds{quantile=""0.95""}"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 16,
+                "x": 8,
+                "y": 0
+            }
+        },
+        {
+            "title": "Session Errors",
+            "type": "stat",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(rate(frontend_session_errors_total[5m]))"
+                }
+            ],
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 0,
+                "y": 8
+            }
+        },
+        {
+            "title": "Latency by API Endpoint",
+            "type": "bar",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, rate(api_request_duration_seconds_bucket[5m])) by (endpoint)"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 16,
+                "x": 0,
+                "y": 12
+            }
+        }
+    ]
+}
+"@
 }
 
 function Get-ApiGatewayDashboard {
-    return @'
-    {
-        "title": "API Gateway Dashboard",
-        "uid": "api-gateway",
-        "tags": ["api", "gateway"],
-        "refresh": "5s",
-        "panels": [
-            {
-                "title": "Request Rate by Service",
-                "type": "stat",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "sum(rate(api_gateway_requests_total[5m])) by (service)"
-                    }
-                ],
-                "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 }
-            },
-            {
-                "title": "Gateway Errors",
-                "type": "timeseries",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "sum(rate(api_gateway_errors_total[5m])) by (service)"
-                    }
-                ],
-                "gridPos": { "h": 8, "w": 16, "x": 8, "y": 0 }
+    return @"
+{
+    "title": "API Gateway Dashboard",
+    "uid": "api-gateway",
+    "tags": ["api", "gateway"],
+    "refresh": "5s",
+    "panels": [
+        {
+            "title": "Request Rate by Service",
+            "type": "stat",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(rate(api_gateway_requests_total[5m])) by (service)"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 0,
+                "y": 0
             }
-        ]
-    }
-'@
+        },
+
+        {
+            "title": "Gateway Errors",
+            "type": "timeseries",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(rate(api_gateway_errors_total[5m])) by (service)"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 16,
+                "x": 8,
+                "y": 0
+            }
+        }
+    ]
+}
+"@
 }
 
 function Get-InventoryServiceDashboard {
-    return @'
-    {
-        "title": "Inventory Service Dashboard",
-        "uid": "inventory-service",
-        "tags": ["inventory", "service"],
-        "refresh": "10s",
-        "panels": [
-            {
-                "title": "Stock Levels",
-                "type": "timeseries",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "inventory_stock_level"
-                    }
-                ],
-                "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
-            },
-            {
-                "title": "Low Stock Alerts",
-                "type": "table",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "inventory_stock_level < inventory_reorder_point"
-                    }
-                ],
-                "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    return @"
+{
+    "title": "Inventory Service Dashboard",
+    "uid": "inventory-service",
+    "tags": ["inventory", "service"],
+    "refresh": "10s",
+    "panels": [
+        {
+            "title": "Stock Levels",
+            "type": "timeseries",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "inventory_stock_level"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 0
             }
-        ]
-    }
-'@
+        },
+
+        {
+            "title": "Low Stock Alerts",
+            "type": "table",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "inventory_stock_level < inventory_reorder_point"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 0
+            }
+        }
+    ]
+}
+"@
 }
 
 function Get-OrderServiceDashboard {
-    return @'
-    {
-        "title": "Order Service Dashboard",
-        "uid": "order-service",
-        "tags": ["orders", "service"],
-        "refresh": "5s",
-        "panels": [
-            {
-                "title": "Order Processing Rate",
-                "type": "stat",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "rate(order_service_orders_processed_total[1m])"
-                    }
-                ],
-                "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 }
-            },
-            {
-                "title": "Failed Orders",
-                "type": "timeseries",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "sum(rate(order_service_failed_orders_total[5m]))"
-                    }
-                ],
-                "gridPos": { "h": 8, "w": 16, "x": 8, "y": 0 }
+    return @"
+{
+    "title": "Order Service Dashboard",
+    "uid": "order-service",
+    "tags": ["orders", "service"],
+    "refresh": "5s",
+    "panels": [
+        {
+            "title": "Order Processing Rate",
+            "type": "stat",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "rate(order_service_orders_processed_total[1m])"
+                }
+            ],
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 0,
+                "y": 0
             }
-        ]
-    }
-'@
+        },
+
+        {
+            "title": "Failed Orders",
+            "type": "timeseries",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(rate(order_service_failed_orders_total[5m]))"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 16,
+                "x": 8,
+                "y": 0
+            }
+        }
+    ]
+}
+"@
 }
 
 Export-ModuleMember -Function @(

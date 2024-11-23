@@ -1,52 +1,72 @@
-﻿    {
-        "title": "Frontend Service Dashboard",
-        "uid": "frontend-service",
-        "tags": ["frontend", "service"],
-        "refresh": "5s",
-        "panels": [
-            {
-                "title": "Active Users",
-                "type": "gauge",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "sum(frontend_active_sessions)"
-                    }
-                ],
-                "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 }
-            },
-            {
-                "title": "Page Load Times (95th Percentile)",
-                "type": "timeseries",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "frontend_page_load_time_seconds{quantile=\"0.95\"}"
-                    }
-                ],
-                "gridPos": { "h": 8, "w": 16, "x": 8, "y": 0 }
-            },
-            {
-                "title": "Session Errors",
-                "type": "stat",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "sum(rate(frontend_session_errors_total[5m]))"
-                    }
-                ],
-                "gridPos": { "h": 4, "w": 8, "x": 0, "y": 8 }
-            },
-            {
-                "title": "Latency by API Endpoint",
-                "type": "bar",
-                "datasource": "Prometheus",
-                "targets": [
-                    {
-                        "expr": "histogram_quantile(0.95, rate(api_request_duration_seconds_bucket[5m])) by (endpoint)"
-                    }
-                ],
-                "gridPos": { "h": 8, "w": 16, "x": 0, "y": 12 }
+{
+    "title": "Frontend Service Dashboard",
+    "uid": "frontend-service",
+    "tags": ["frontend", "service"],
+    "refresh": "5s",
+    "panels": [
+        {
+            "title": "Active Users",
+            "type": "gauge",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(frontend_active_sessions)"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 8,
+                "x": 0,
+                "y": 0
             }
-        ]
-    }
+        },
+        {
+            "title": "Page Load Times (95th Percentile)",
+            "type": "timeseries",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "frontend_page_load_time_seconds{quantile=""0.95""}"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 16,
+                "x": 8,
+                "y": 0
+            }
+        },
+        {
+            "title": "Session Errors",
+            "type": "stat",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "sum(rate(frontend_session_errors_total[5m]))"
+                }
+            ],
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 0,
+                "y": 8
+            }
+        },
+        {
+            "title": "Latency by API Endpoint",
+            "type": "bar",
+            "datasource": "Prometheus",
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, rate(api_request_duration_seconds_bucket[5m])) by (endpoint)"
+                }
+            ],
+            "gridPos": {
+                "h": 8,
+                "w": 16,
+                "x": 0,
+                "y": 12
+            }
+        }
+    ]
+}
