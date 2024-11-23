@@ -73,38 +73,28 @@ Function Test-FileEncoding {
     return $true
 }
 
-# Modify the file writing in Initialize-Monitoring
-try {
-    $cleanContent = $content | ConvertFrom-Json | ConvertTo-Json -Depth 100 -Compress:$false
-    
-    # Try alternative approach using Out-File
-    $cleanContent | Out-File -FilePath $path -Encoding utf8NoBOM -NoNewline
-    
-    # Verify the file
-    if (-not (Test-FileEncoding -Path $path)) {
-        Write-Error "File was written with BOM: $path"
-        # Try to fix it
-        $bytes = [System.IO.File]::ReadAllBytes($path)
-        if ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-            [System.IO.File]::WriteAllBytes($path, $bytes[3..($bytes.Length-1)])
-        }
-    }
-} catch {
-    Write-Error "Error writing dashboard: $($_.Exception.Message)"
-}
-
-Function Write-JsonWithoutBOM {
-    param (
-        [string]$Path,
-        [string]$Content
+# Define JSON writing function
+function Write-JsonWithoutBOM {
+    param(
+        [string]$path,
+        [string]$content
     )
-    
-    # Convert string to bytes using UTF-8 encoding without BOM
-    $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
-    $jsonBytes = $utf8NoBomEncoding.GetBytes($Content)
-    
-    # Write bytes to file
-    [System.IO.File]::WriteAllBytes($Path, $jsonBytes)
+    try {
+        # Create directory if it doesn't exist
+        $directory = Split-Path -Parent $path
+        if (-not (Test-Path $directory)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+
+        # Write file without BOM
+        $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($path, $content.Trim(), $utf8NoBomEncoding)
+        return $true
+    }
+    catch {
+        Write-Error "Error writing file $path : $_"
+        return $false
+    }
 }
 
 Function Validate-Dashboard {
@@ -168,17 +158,75 @@ Function Validate-Dashboard {
     }
 }
 
-Function Write-JsonWithoutBOM {
+Function Initialize-Monitoring {
     param (
-        [string]$Path,
-        [string]$Content
+        [Parameter(Mandatory=$true)]
+        [string]$ConfigPath
     )
+
+    # Create the dashboard directory
+    $dashboardPath = Join-Path $ConfigPath "grafana\dashboards"
+    if (-not (Test-Path $dashboardPath)) {
+        New-Item -ItemType Directory -Path $dashboardPath -Force | Out-Null
+    }
+
+    # Define dashboard configurations
+    $dashboards = @(
+        @{ FileName = "api-gateway.json"; GetContent = { Get-ApiGatewayDashboard } },
+        @{ FileName = "security.json"; GetContent = { Get-SecurityDashboard } },
+        @{ FileName = "service-health.json"; GetContent = { Get-ServiceHealthDashboard } },
+        @{ FileName = "frontend-realtime.json"; GetContent = { Get-FrontendRealtimeDashboard } },
+        @{ FileName = "orders-realtime.json"; GetContent = { Get-OrdersRealtimeDashboard } },
+        @{ FileName = "inventory-realtime.json"; GetContent = { Get-InventoryRealtimeDashboard } },
+        @{ FileName = "frontend-service.json"; GetContent = { Get-FrontendServiceDashboard } },
+        @{ FileName = "inventory-service.json"; GetContent = { Get-InventoryServiceDashboard } },
+        @{ FileName = "order-service.json"; GetContent = { Get-OrderServiceDashboard } },
+        @{ FileName = "overview.json"; GetContent = { Get-OverviewDashboard } }
+    )
+
+    foreach ($dashboard in $dashboards) {
+        $path = Join-Path $dashboardPath $dashboard.FileName
+        try {
+            # Get content using scriptblock
+            $content = & $dashboard.GetContent
+            
+            if ([string]::IsNullOrEmpty($content)) {
+                Write-Warning "Empty content returned for $($dashboard.FileName)"
+                continue
+            }
+
+            # Write the dashboard file
+            $success = Write-JsonWithoutBOM -path $path -content $content
+            
+            if ($success) {
+                # Verify the file
+                if (Test-Path $path) {
+                    $bytes = [System.IO.File]::ReadAllBytes($path)
+                    if ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+                        Write-Warning "BOM detected in $($dashboard.FileName)"
+                    } else {
+                        Write-Host "Successfully created $($dashboard.FileName)" -ForegroundColor Green
+                    }
+                }
+            }
+        }
+        catch {
+            Write-Error "Error processing $($dashboard.FileName): $_"
+        }
+    }
+
+    Write-Host "`nDashboard initialization complete. Location: $dashboardPath"
     
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Content)
-    [System.IO.File]::WriteAllBytes($Path, $bytes)
+    # Final verification
+    Get-ChildItem -Path $dashboardPath -Filter "*.json" | ForEach-Object {
+        $bytes = [System.IO.File]::ReadAllBytes($_.FullName)
+        $hasBom = $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+        $status = if ($hasBom) { "Has BOM" } else { "No BOM" }
+        Write-Host "$($_.Name): $status" -ForegroundColor $(if ($hasBom) { "Red" } else { "Green" })
+    }
 }
 
-Function Initialize-Monitoring {
+Function IInitialize-Monitoring {
     param (
         [Parameter(Mandatory=$true)]
         [string]$ConfigPath
@@ -214,11 +262,17 @@ Function Initialize-Monitoring {
         $content = $dashboard.Content
 
         try {
-            # Convert content to bytes directly
-            $contentBytes = [System.Text.Encoding]::ASCII.GetBytes($content)
-            
-            # Write bytes to file
-            [System.IO.File]::WriteAllBytes($path, $contentBytes)
+            # Ensure content starts with {
+            $content = $content.TrimStart()
+            if (-not $content.StartsWith("{")) {
+                Write-Warning "Content doesn't start with {, cleaning..."
+                $content = $content.Substring($content.IndexOf("{"))
+            }
+
+            # Write content as ASCII
+            $streamWriter = New-Object System.IO.StreamWriter($path, $false, [System.Text.ASCIIEncoding]::new())
+            $streamWriter.Write($content)
+            $streamWriter.Close()
             
             Write-Host "Processed: $($dashboard.FileName)" -ForegroundColor Green
         }
@@ -229,11 +283,11 @@ Function Initialize-Monitoring {
 
     Write-Host "`nFinal Check:"
     Get-ChildItem -Path $dashboardPath -Filter "*.json" | ForEach-Object {
-        $firstBytes = Get-Content -Path $_.FullName -Raw -Encoding Byte -TotalCount 3
-        if ($firstBytes[0] -eq 0xEF -and $firstBytes[1] -eq 0xBB -and $firstBytes[2] -eq 0xBF) {
-            Write-Host "$($_.Name): Has BOM" -ForegroundColor Red
+        $content = Get-Content -Path $_.FullName -Raw
+        if ($content.TrimStart().StartsWith("{")) {
+            Write-Host "$($_.Name): Valid JSON start" -ForegroundColor Green
         } else {
-            Write-Host "$($_.Name): No BOM" -ForegroundColor Green
+            Write-Host "$($_.Name): Invalid JSON start" -ForegroundColor Red
         }
     }
 }
@@ -409,7 +463,7 @@ Function Initialize---Monitoring {
     }
 }
 
-Function Initialize--Monitoring {
+Function _Initialize--Monitoring {
     param (
         [Parameter(Mandatory=$true)]
         [string]$ConfigPath
