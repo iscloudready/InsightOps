@@ -1003,34 +1003,34 @@ datasources:
   }
 }
 '@
-        $dashboardPath = Join-Path $grafanaPath "dashboards/overview.json"
-        Set-Content -Path $dashboardPath -Value $sampleDashboard -Encoding UTF8
+        #$dashboardPath = Join-Path $grafanaPath "dashboards/overview.json"
+        #Set-Content -Path $dashboardPath -Value $sampleDashboard -Encoding UTF8
 
         # Create all monitoring dashboards
-        $dashboards = @{
-            "api-gateway.json" = Get-ApiGatewayDashboard
-            "security.json" = Get-SecurityDashboard
-            "service-health.json" = Get-ServiceHealthDashboard
-            "frontend-realtime.json" = Get-FrontendRealtimeDashboard
-            "orders-realtime.json" = Get-OrdersRealtimeDashboard
-            "inventory-realtime.json" = Get-InventoryRealtimeDashboard
-        }
+        #$dashboards = @{
+        #    "api-gateway.json" = Get-ApiGatewayDashboard
+        #   "security.json" = Get-SecurityDashboard
+        #    "service-health.json" = Get-ServiceHealthDashboard
+        #    "frontend-realtime.json" = Get-FrontendRealtimeDashboard
+        #    "orders-realtime.json" = Get-OrdersRealtimeDashboard
+        #    "inventory-realtime.json" = Get-InventoryRealtimeDashboard
+        #}
 
-        foreach ($dashboard in $dashboards.GetEnumerator()) {
-            $path = Join-Path $grafanaPath "dashboards/$($dashboard.Key)"
-            Write-Host "Creating dashboard: $($dashboard.Key)" -ForegroundColor Cyan
-            Set-Content -Path $path -Value $dashboard.Value -Encoding UTF8
-        }
+        #foreach ($dashboard in $dashboards.GetEnumerator()) {
+        #    $path = Join-Path $grafanaPath "dashboards/$($dashboard.Key)"
+        #    Write-Host "Creating dashboard: $($dashboard.Key)" -ForegroundColor Cyan
+        #    Set-Content -Path $path -Value $dashboard.Value -Encoding UTF8
+        #}
 
-        Write-Host "✓ Grafana configurations created successfully" -ForegroundColor Green
-        Write-Host "✓ Monitoring dashboards initialized successfully" -ForegroundColor Green
-        Write-Host "! You'll need to restart Grafana for these changes to take effect" -ForegroundColor Yellow
+        #Write-Host "✓ Grafana configurations created successfully" -ForegroundColor Green
+        #Write-Host "✓ Monitoring dashboards initialized successfully" -ForegroundColor Green
+        #Write-Host "! You'll need to restart Grafana for these changes to take effect" -ForegroundColor Yellow
 
         # Add to Initialize-GrafanaDashboards
-        $dashboardFiles = Get-ChildItem -Path (Join-Path $grafanaPath "dashboards") -Filter "*.json"
-        foreach ($file in $dashboardFiles) {
-            Test-DashboardJson $file.FullName
-        }
+        #$dashboardFiles = Get-ChildItem -Path (Join-Path $grafanaPath "dashboards") -Filter "*.json"
+        #foreach ($file in $dashboardFiles) {
+        #    Test-DashboardJson $file.FullName
+        #}
 
         return $true
     }

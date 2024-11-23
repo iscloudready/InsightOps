@@ -14,3 +14,8 @@ scrape_configs:
   - job_name: 'dotnet'
     static_configs:
       - targets: ['gateway:80', 'orders:80', 'inventory:80', 'frontend:80']
+
+  - job_name: 'windows_exporter'
+    static_configs:
+      - targets: ['172.31.192.1:9182', 'localhost:9182']
+ 

@@ -6,7 +6,14 @@ $script:BASE_PATH = $PSScriptRoot
 $script:MODULE_PATH = Join-Path $BASE_PATH "Modules"
 $env:MODULE_PATH = $script:MODULE_PATH
 $env:CONFIG_PATH = $script:CONFIG_PATH
-# In main.ps1, add:
+
+# Import the Core module
+Import-Module (Join-Path $script:MODULE_PATH "Core.psm1") -Force
+
+# Set the CONFIG_PATH environment variable
+$env:CONFIG_PATH = $CONFIG_PATH
+
+# Now import the Monitoring module
 Import-Module (Join-Path $script:MODULE_PATH "Monitoring.psm1") -Force
 
 # Helper function to check prerequisites before starting services

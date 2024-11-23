@@ -693,6 +693,29 @@ function Initialize-Environment {
             }
         }
 
+        try {
+            Write-Host "Updating prometheus config with windows exporter settings..." -ForegroundColor Yellow
+            $exporterPort = 9182
+            Write-Host "Exporter port: $exporterPort"
+
+            # Set the system IP and exporter port
+            $systemIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.PrefixOrigin -eq 'Dhcp' -or $_.PrefixOrigin -eq 'Manual' }).IPAddress | Select-Object -First 1
+            Write-Host "System IP address: $systemIp"
+
+            $exporterUrl = "http://${systemIp}:${exporterPort}/metrics"
+            Write-Host "Exporter URL: $exporterUrl"
+
+            $prometheusUrlCheck = "http://${systemIp}:9090/metrics"
+            Write-Host "Prometheus URL check: $prometheusUrlCheck"
+
+            # Update the Prometheus configuration file
+            Update-PrometheusConfigFile -systemIp $systemIp -exporterPort $exporterPort
+            Write-Host "Prometheus configuration file updated successfully."
+        } catch {
+            Write-Host "An error occurred: $($Error[0].Message)"
+            Write-Host "Error details: $($Error[0].Exception.ToString())"
+        }
+
         Write-Info "Setting environment configuration..."
         if (Set-EnvironmentConfig -Environment $Environment -Force:$Force) {
             Write-Success "  [OK] Created .env.$Environment"

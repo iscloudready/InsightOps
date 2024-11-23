@@ -1,0 +1,20 @@
+{
+  "title": "Overview Service Dashboard",
+  "uid": "overview-service",
+  "tags": ["overview", "service"],
+  "refresh": "10s",
+  "panels": [
+    {
+      "title": "System Overview",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(up{job=~\".*\"} == 1)",
+          "legendFormat": "Active Services"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+    }
+  ]
+}
