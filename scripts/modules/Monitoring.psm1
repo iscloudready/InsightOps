@@ -63,10 +63,10 @@ Function Validate-Dashboard {
     )
 
     try {
-        # Load schema and dashboard JSON
-        $dashboardJson = ConvertFrom-Json -InputObject $Content -ErrorAction Stop
+        # Parse JSON content
+        $dashboardJson = $Content | ConvertFrom-Json -ErrorAction Stop
 
-        # Additional validation logic
+        # Validate required fields
         if (-not $dashboardJson.title) {
             Write-Error "Dashboard title is missing."
             return $false
@@ -77,7 +77,7 @@ Function Validate-Dashboard {
             return $false
         }
 
-        if (-not $dashboardJson.panels) {
+        if (-not $dashboardJson.panels -or $dashboardJson.panels.Count -eq 0) {
             Write-Error "Dashboard panels are missing."
             return $false
         }
@@ -94,11 +94,6 @@ Function Validate-Dashboard {
             }
 
             if ($panel.type -eq "timeseries") {
-                if (-not $panel.targets) {
-                    Write-Error "Timeseries panel targets are missing."
-                    return $false
-                }
-
                 foreach ($target in $panel.targets) {
                     if (-not $target.expr) {
                         Write-Error "Timeseries panel target expression is missing."
@@ -111,7 +106,7 @@ Function Validate-Dashboard {
         Write-Verbose "Dashboard validated successfully"
         return $true
     } catch {
-        Write-Error "Error parsing dashboard JSON: $($Error[0].Message)"
+        Write-Error "Error parsing or validating dashboard JSON: $($Error[0].Message)"
         return $false
     }
 }
