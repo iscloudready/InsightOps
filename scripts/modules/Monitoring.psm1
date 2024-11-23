@@ -116,6 +116,54 @@ Function Validate-Dashboard {
     }
 }
 
+Function Initialize-Monitoring {
+    param (
+        [string]$ConfigPath
+    )
+
+    # Create the dashboard directory
+    $dashboardPath = Join-Path $ConfigPath "grafana/dashboards"
+    if (-not (Test-Path $dashboardPath)) {
+        New-Item -ItemType Directory -Path $dashboardPath -Force | Out-Null
+    }
+
+    # Define dashboard configurations
+    $dashboards = @(
+        @{ FileName = "api-gateway.json"; Content = (Get-ApiGatewayDashboard) },
+        @{ FileName = "security.json"; Content = (Get-SecurityDashboard) },
+        @{ FileName = "service-health.json"; Content = (Get-ServiceHealthDashboard) },
+        @{ FileName = "frontend-realtime.json"; Content = (Get-FrontendRealtimeDashboard) },
+        @{ FileName = "orders-realtime.json"; Content = (Get-OrdersRealtimeDashboard) },
+        @{ FileName = "inventory-realtime.json"; Content = (Get-InventoryRealtimeDashboard) },
+        @{ FileName = "frontend-service.json"; Content = (Get-FrontendServiceDashboard) },
+        @{ FileName = "inventory-service.json"; Content = (Get-InventoryServiceDashboard) },
+        @{ FileName = "order-service.json"; Content = (Get-OrderServiceDashboard) }
+    )
+
+    foreach ($dashboard in $dashboards) {
+        $path = Join-Path $dashboardPath $dashboard.FileName
+        $content = $dashboard.Content
+
+        try {
+            # Validate JSON content using Validate-Dashboard
+            Write-Verbose "Validating dashboard: $($dashboard.FileName)"
+            $isValid = Validate-Dashboard -Content $content -Schema $dashboardSchema
+
+            if (-not $isValid) {
+                Write-Warning "Dashboard validation failed: $($dashboard.FileName)"
+                continue
+            }
+
+            # Write JSON to file without BOM
+            Set-Content -Path $path -Value $content -Encoding utf8 -Force
+
+            Write-Verbose "Successfully saved dashboard: $path"
+        } catch {
+            Write-Error "Error processing dashboard file ($path): $_"
+        }
+    }
+}
+
 Function _Validate-Dashboard {
     param (
         [string]$Content,
@@ -186,55 +234,6 @@ Function _Validate-Dashboard {
     } catch {
         Write-Error "Unexpected error during validation: $($Error[0].Message)"
         return $false
-    }
-}
-
-Function Initialize-Monitoring {
-    param (
-        [string]$ConfigPath
-    )
-
-    # Create the dashboard directory
-    $dashboardPath = Join-Path $ConfigPath "grafana/dashboards"
-    if (-not (Test-Path $dashboardPath)) {
-        New-Item -ItemType Directory -Path $dashboardPath -Force | Out-Null
-    }
-
-    # Define dashboard configurations
-    $dashboards = @(
-        @{ FileName = "api-gateway.json"; Content = (Get-ApiGatewayDashboard) },
-        @{ FileName = "security.json"; Content = (Get-SecurityDashboard) },
-        @{ FileName = "service-health.json"; Content = (Get-ServiceHealthDashboard) },
-        @{ FileName = "frontend-realtime.json"; Content = (Get-FrontendRealtimeDashboard) },
-        @{ FileName = "orders-realtime.json"; Content = (Get-OrdersRealtimeDashboard) },
-        @{ FileName = "inventory-realtime.json"; Content = (Get-InventoryRealtimeDashboard) },
-        @{ FileName = "frontend-service.json"; Content = (Get-FrontendServiceDashboard) },
-        @{ FileName = "inventory-service.json"; Content = (Get-InventoryServiceDashboard) },
-        @{ FileName = "order-service.json"; Content = (Get-OrderServiceDashboard) }
-    )
-
-    foreach ($dashboard in $dashboards) {
-        $path = Join-Path $dashboardPath $dashboard.FileName
-        $content = $dashboard.Content
-
-        try {
-            # Validate JSON content using Validate-Dashboard
-            Write-Verbose "Validating dashboard: $($dashboard.FileName)"
-            $isValid = Validate-Dashboard -Content $content -Schema $dashboardSchema
-
-            if (-not $isValid) {
-                Write-Warning "Dashboard validation failed: $($dashboard.FileName)"
-                continue
-            }
-
-            # Write JSON to file without BOM
-            $Utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
-            [System.IO.File]::WriteAllText($path, $content, $Utf8NoBomEncoding)
-
-            Write-Verbose "Successfully saved dashboard: $path"
-        } catch {
-            Write-Error "Error processing dashboard file ($path): $_"
-        }
     }
 }
 
