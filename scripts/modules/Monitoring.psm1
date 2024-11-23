@@ -168,7 +168,72 @@ Function Validate-Dashboard {
     }
 }
 
+Function Write-JsonWithoutBOM {
+    param (
+        [string]$Path,
+        [string]$Content
+    )
+    
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Content)
+    [System.IO.File]::WriteAllBytes($Path, $bytes)
+}
+
 Function Initialize-Monitoring {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$ConfigPath
+    )
+
+    # Create the dashboard directory
+    $dashboardPath = Join-Path $ConfigPath "grafana/dashboards"
+    if (-not (Test-Path $dashboardPath)) {
+        New-Item -ItemType Directory -Path $dashboardPath -Force | Out-Null
+    }
+
+    # Define dashboard configurations
+    $dashboards = @(
+        @{ FileName = "api-gateway.json"; Content = (Get-ApiGatewayDashboard) },
+        @{ FileName = "security.json"; Content = (Get-SecurityDashboard) },
+        @{ FileName = "service-health.json"; Content = (Get-ServiceHealthDashboard) },
+        @{ FileName = "frontend-realtime.json"; Content = (Get-FrontendRealtimeDashboard) },
+        @{ FileName = "orders-realtime.json"; Content = (Get-OrdersRealtimeDashboard) },
+        @{ FileName = "inventory-realtime.json"; Content = (Get-InventoryRealtimeDashboard) },
+        @{ FileName = "frontend-service.json"; Content = (Get-FrontendServiceDashboard) },
+        @{ FileName = "inventory-service.json"; Content = (Get-InventoryServiceDashboard) },
+        @{ FileName = "order-service.json"; Content = (Get-OrderServiceDashboard) },
+        @{ FileName = "overview.json"; Content = (Get-OverviewDashboard) }
+    )
+
+    foreach ($dashboard in $dashboards) {
+        $path = Join-Path $dashboardPath $dashboard.FileName
+        $content = $dashboard.Content
+
+        try {
+            # Validate JSON content
+            $isValid = Validate-Dashboard -Content $content -Schema $dashboardSchema
+            if (-not $isValid) {
+                Write-Warning "Dashboard validation failed: $($dashboard.FileName)"
+                continue
+            }
+
+            # Clean and format JSON
+            $jsonObject = $content | ConvertFrom-Json
+            $cleanContent = $jsonObject | ConvertTo-Json -Depth 100 -Compress:$false
+
+            # Write file directly without BOM
+            Write-JsonWithoutBOM -Path $path -Content $cleanContent
+            Write-Host "Successfully processed dashboard: $($dashboard.FileName)" -ForegroundColor Green
+        }
+        catch {
+            Write-Error "Error processing dashboard file ($path): $_"
+        }
+    }
+
+    Write-Host "`nDashboard initialization complete. Location: $dashboardPath"
+    Write-Host "Total dashboards processed: $($dashboards.Count)"
+}
+
+Function Initialize--Monitoring {
     param (
         [Parameter(Mandatory=$true)]
         [string]$ConfigPath
