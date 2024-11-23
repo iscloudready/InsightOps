@@ -600,99 +600,63 @@ function Provision-Dashboard {
 }
 
 function Get-OverviewDashboard {
-    return @'
+    return @"
 {
-    "title": "System Overview Dashboard",
-    "uid": "system-overview",
-    "tags": ["overview", "system"],
-    "refresh": "5s",
-    "panels": [
+  "title": "System Overview Dashboard",
+  "uid": "system-overview",
+  "tags": ["overview", "system"],
+  "refresh": "5s",
+  "panels": [
+    {
+      "title": "System Health Status",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "targets": [
         {
-            "title": "System Health Status",
-            "type": "gauge",
-            "datasource": "Prometheus",
-            "targets": [
-                {
-                    "expr": "avg(up{job=~\".*\"})*100",
-                    "legendFormat": "System Health"
-                }
-            ],
-            "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
-            "options": {
-                "thresholds": [
-                    {"color": "red", "value": null},
-                    {"color": "yellow", "value": 80},
-                    {"color": "green", "value": 95}
-                ]
-            }
-        },
-        {
-            "title": "Active Services",
-            "type": "stat",
-            "datasource": "Prometheus",
-            "targets": [
-                {
-                    "expr": "count(up{job=~\".*\"} == 1)",
-                    "legendFormat": "Active Services"
-                }
-            ],
-            "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0}
-        },
-        {
-            "title": "Total Request Rate",
-            "type": "timeseries",
-            "datasource": "Prometheus",
-            "targets": [
-                {
-                    "expr": "sum(rate(http_requests_total[5m]))",
-                    "legendFormat": "Requests/sec"
-                }
-            ],
-            "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0}
-        },
-        {
-            "title": "Error Rate by Service",
-            "type": "timeseries",
-            "datasource": "Prometheus",
-            "targets": [
-                {
-                    "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) by (service)",
-                    "legendFormat": "{{service}}"
-                }
-            ],
-            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
-        },
-        {
-            "title": "Service Response Times",
-            "type": "heatmap",
-            "datasource": "Prometheus",
-            "targets": [
-                {
-                    "expr": "sum(rate(http_request_duration_seconds_bucket[5m])) by (le)",
-                    "format": "heatmap"
-                }
-            ],
-            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
-        },
-        {
-            "title": "System Resources",
-            "type": "timeseries",
-            "datasource": "Prometheus",
-            "targets": [
-                {
-                    "expr": "sum(rate(process_cpu_seconds_total[5m])) by (job)",
-                    "legendFormat": "{{job}} - CPU"
-                },
-                {
-                    "expr": "sum(process_resident_memory_bytes) by (job)",
-                    "legendFormat": "{{job}} - Memory"
-                }
-            ],
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+          "expr": "avg(up{job=~\".*\"})*100",
+          "legendFormat": "System Health"
         }
-    ]
+      ],
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "options": {
+        "thresholds": [
+          {"color": "red", "value": null},
+          {"color": "yellow", "value": 80},
+          {"color": "green", "value": 95}
+        ]
+      }
+    },
+    {
+      "title": "Active Services",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "count(up{job=~\".*\"} == 1)",
+          "legendFormat": "Active Services"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0}
+    },
+    {
+      "title": "System Resources",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(process_cpu_seconds_total[5m])) by (job)",
+          "legendFormat": "{{job}} - CPU"
+        },
+        {
+          "expr": "sum(process_resident_memory_bytes) by (job)",
+          "legendFormat": "{{job}} - Memory"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+    }
+  ]
 }
-'@
+"@
 }
 
 # Dashboard JSON definitions remain the same but with proper encoding handling
