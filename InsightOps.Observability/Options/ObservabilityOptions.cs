@@ -14,6 +14,12 @@ public class ObservabilityOptions
     public EnvironmentOptions Development { get; set; } = new();
     public EnvironmentOptions Docker { get; set; } = new();
     public GrafanaOptions Grafana { get; set; } = new();
+
+    // Flat properties for direct references
+    public string LokiUrl { get; set; }
+    public string TempoEndpoint { get; set; }
+    public string MetricsEndpoint { get; set; }
+    public bool EnableDetailedMetrics { get; set; }
 }
 
 public class GrafanaOptions

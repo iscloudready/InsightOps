@@ -246,6 +246,157 @@ x-healthcheck: &default-healthcheck
   start_period: 30s
 
 services:
+  # ------------------- Infrastructure Components -------------------
+  postgres:
+    image: postgres:13
+    container_name: ${NAMESPACE:-insightops}_db
+    environment:
+      POSTGRES_USER: ${DB_USER:-insightops_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-insightops_pwd}
+      POSTGRES_DB: ${DB_NAME:-insightops_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-insightops_user} -d ${DB_NAME:-insightops_db}"]
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ${NAMESPACE:-insightops}_grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-InsightOps2024!}
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/overview.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ${CONFIG_PATH}/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ${CONFIG_PATH}/grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health"]
+    logging: *default-logging
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ${NAMESPACE:-insightops}_prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+    logging: *default-logging
+
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: ${NAMESPACE:-insightops}_loki
+    user: "root"
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+      - ${CONFIG_PATH}/loki_wal:/loki/wal
+    ports:
+      - "${LOKI_PORT:-3101}:3100"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: ${NAMESPACE:-insightops}_tempo
+    user: root
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    environment:
+      TEMPO_LOG_LEVEL: debug
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "${TEMPO_PORT:-4317}:4317"
+      - "${TEMPO_HTTP_PORT:-4318}:4318"
+      - "3200:3200"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3200/ready || exit 1"]
+
+  # ------------------- Application Components -------------------
+  orderservice:
+    build:
+      context: ../OrderService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_orderservice
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+
+  inventoryservice:
+    build:
+      context: ../InventoryService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_inventoryservice
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+
+  apigateway:
+    build:
+      context: ../ApiGateway
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_apigateway
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+
+  frontend:
+    build:
+      context: ../FrontendService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_frontend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+
+volumes:
+  postgres_data:
+    name: ${NAMESPACE:-insightops}_postgres_data
+  grafana_data:
+    name: ${NAMESPACE:-insightops}_grafana_data
+  prometheus_data:
+    name: ${NAMESPACE:-insightops}_prometheus_data
+  loki_data:
+    name: ${NAMESPACE:-insightops}_loki_data
+  tempo_data:
+    name: ${NAMESPACE:-insightops}_tempo_data
+'@
+}
+
+function _Get-DockerComposeConfig {
+    return @'
+name: insightops
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-healthcheck: &default-healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
+services:
   postgres:
     image: postgres:13
     container_name: ${NAMESPACE:-insightops}_db

@@ -17,5 +17,6 @@
             // Notify all connected clients
             await Clients.All.SendAsync("MetricUpdated", service, metric, value);
         }
+
     }
 }

@@ -76,6 +76,10 @@ public static class ObservabilityExtensions
                     .AddHttpClientInstrumentation()
                     .AddOtlpExporter(options =>
                     {
+                        if (string.IsNullOrEmpty(envOptions.Infrastructure.TempoEndpoint))
+                        {
+                            throw new InvalidOperationException("TempoEndpoint is not configured in EnvironmentOptions.");
+                        }
                         options.Endpoint = new Uri(envOptions.Infrastructure.TempoEndpoint);
                     })
                     .SetResourceBuilder(
@@ -84,7 +88,7 @@ public static class ObservabilityExtensions
                             .AddTelemetrySdk()
                             .AddAttributes(new Dictionary<string, object>
                             {
-                                ["environment"] = commonOptions.Environment,
+                                ["environment"] = commonOptions.Environment.ToString(),
                                 ["service.version"] = GetServiceVersion()
                             }));
             })
@@ -94,12 +98,15 @@ public static class ObservabilityExtensions
                     .AddAspNetCoreInstrumentation()
                     .AddHttpClientInstrumentation()
                     .AddRuntimeInstrumentation()
-                    .AddPrometheusExporter((PrometheusExporterOptions options) =>
+                    .AddPrometheusExporter((PrometheusAspNetCoreOptions options) =>
                     {
+                        if (string.IsNullOrEmpty(commonOptions.MetricsEndpoint))
+                        {
+                            throw new InvalidOperationException("MetricsEndpoint is not configured in CommonOptions.");
+                        }
                         options.ScrapeEndpointPath = commonOptions.MetricsEndpoint;
                     });
             });
-
     }
 
     private static void ConfigureSerilog(
@@ -154,34 +161,39 @@ public static class ObservabilityExtensions
         });
     }
 
-    private static void ConfigureHealthChecks(
-        IServiceCollection services,
-        EnvironmentOptions envOptions)
+    private static void ConfigureHealthChecks(IServiceCollection services, EnvironmentOptions envOptions)
     {
         var healthChecks = services.AddHealthChecks();
 
         // Add infrastructure health checks
-        healthChecks
-            .AddUrlGroup(
-                new Uri($"{envOptions.Infrastructure.PrometheusEndpoint}/-/healthy"),
-                name: "prometheus",
-                tags: new[] { "infrastructure" })
-            .AddUrlGroup(
-                new Uri($"{envOptions.Infrastructure.LokiUrl}/ready"),
-                name: "loki",
-                tags: new[] { "infrastructure" })
-            .AddUrlGroup(
-                new Uri($"{envOptions.Infrastructure.TempoEndpoint}/ready"),
-                name: "tempo",
-                tags: new[] { "infrastructure" });
-
-        // Add service health checks
-        foreach (var service in GetServiceEndpoints(envOptions.Services))
+        if (!string.IsNullOrWhiteSpace(envOptions.Infrastructure.PrometheusEndpoint) &&
+            Uri.TryCreate($"{envOptions.Infrastructure.PrometheusEndpoint}/-/healthy", UriKind.Absolute, out var prometheusUri))
         {
-            healthChecks.AddUrlGroup(
-                new Uri($"{service.Value}/health"),
-                name: service.Key.ToLowerInvariant(),
-                tags: new[] { "service" });
+            healthChecks.AddUrlGroup(prometheusUri, name: "prometheus", tags: new[] { "infrastructure" });
+        }
+        else
+        {
+            throw new InvalidOperationException("Invalid PrometheusEndpoint URI.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(envOptions.Infrastructure.LokiUrl) &&
+            Uri.TryCreate($"{envOptions.Infrastructure.LokiUrl}/ready", UriKind.Absolute, out var lokiUri))
+        {
+            healthChecks.AddUrlGroup(lokiUri, name: "loki", tags: new[] { "infrastructure" });
+        }
+        else
+        {
+            throw new InvalidOperationException("Invalid LokiUrl URI.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(envOptions.Infrastructure.TempoEndpoint) &&
+            Uri.TryCreate($"{envOptions.Infrastructure.TempoEndpoint}/ready", UriKind.Absolute, out var tempoUri))
+        {
+            healthChecks.AddUrlGroup(tempoUri, name: "tempo", tags: new[] { "infrastructure" });
+        }
+        else
+        {
+            throw new InvalidOperationException("Invalid TempoEndpoint URI.");
         }
     }
 
