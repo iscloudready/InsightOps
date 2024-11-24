@@ -16,33 +16,49 @@ using FrontendService.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Get configuration values
+var dataProtectionConfig = builder.Configuration.GetSection("DataProtection").Get<DataProtectionConfig>()
+    ?? new DataProtectionConfig();
+var httpClientConfig = builder.Configuration.GetSection("HttpClient").Get<HttpClientConfig>()
+    ?? new HttpClientConfig();
+var signalRConfig = builder.Configuration.GetSection("SignalR").Get<SignalRConfig>()
+    ?? new SignalRConfig();
+
+var dataProtectionPath = builder.Configuration["DataProtection:Keys"] ?? "/app/Keys";
+var serviceName = builder.Configuration["Observability:Common:ServiceName"] ?? "FrontendService";
+var retryCount = builder.Configuration.GetValue<int>("HttpClient:RetryCount", 5);
+var retryDelayMs = builder.Configuration.GetValue<int>("HttpClient:RetryDelayMs", 100);
+var circuitBreakerThreshold = builder.Configuration.GetValue<int>("HttpClient:CircuitBreakerThreshold", 10);
+var circuitBreakerDelay = builder.Configuration.GetValue<int>("HttpClient:CircuitBreakerDelay", 5);
+var httpClientTimeout = builder.Configuration.GetValue<int>("HttpClient:TimeoutSeconds", 30);
+
 // Ensure Data Protection keys directory exists
-var keysDirectory = "/app/Keys";
-Directory.CreateDirectory(keysDirectory);
+Directory.CreateDirectory(dataProtectionPath);
 
 // Configure Data Protection
 builder.Services.AddDataProtection()
-    .PersistKeysToFileSystem(new DirectoryInfo(keysDirectory))
-    .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
+    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionConfig.Keys))
+    .SetDefaultKeyLifetime(TimeSpan.FromDays(dataProtectionConfig.KeyLifetimeDays));
+//builder.Services.AddDataProtection()
+//   .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath))
+//   .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
 
 // Configure Serilog
 builder.Host.UseInsightOpsSerilog(
     builder.Configuration,
-    "FrontendService");
+    serviceName);
 
 // Add centralized observability
 builder.Services.AddInsightOpsObservability(
     builder.Configuration,
-    "FrontendService");
+    serviceName);
 
 // Register application services
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
 
-// Add SignalR
 builder.Services.AddSignalR();
 
-// Configure Controllers
 builder.Services.AddControllersWithViews()
     .AddJsonOptions(options =>
     {
@@ -57,48 +73,47 @@ builder.Services.AddHttpClient("ApiGateway", client =>
         ?? throw new InvalidOperationException("ApiGateway URL is not configured");
     client.BaseAddress = new Uri(apiGatewayUrl);
     client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-    client.Timeout = TimeSpan.FromSeconds(30);
+    client.Timeout = TimeSpan.FromSeconds(httpClientTimeout);
 })
 .AddTransientHttpErrorPolicy(p =>
     p.WaitAndRetryAsync(
-        retryCount: 5,
+        retryCount: retryCount,
         sleepDurationProvider: retryAttempt =>
-            TimeSpan.FromMilliseconds(100 * Math.Pow(2, retryAttempt)),
-        onRetry: (exception, timeSpan, retryCount, context) =>
+            TimeSpan.FromMilliseconds(retryDelayMs * Math.Pow(2, retryAttempt)),
+        onRetry: (exception, timeSpan, attemptCount, context) =>
         {
             Log.Warning(
                 "Retry {RetryCount} after {Delay}ms delay due to {ErrorMessage}",
-                retryCount, timeSpan.TotalMilliseconds, exception.Exception?.Message);
+                attemptCount, timeSpan.TotalMilliseconds, exception.Exception?.Message);
         }))
 .AddTransientHttpErrorPolicy(p =>
     p.CircuitBreakerAsync(
-        handledEventsAllowedBeforeBreaking: 10,
-        durationOfBreak: TimeSpan.FromSeconds(5),
+        handledEventsAllowedBeforeBreaking: circuitBreakerThreshold,
+        durationOfBreak: TimeSpan.FromSeconds(circuitBreakerDelay),
         onBreak: (exception, duration) =>
         {
             Log.Warning(
                 "Circuit breaker opened for {Duration}s due to {ErrorMessage}",
                 duration.TotalSeconds, exception.Exception?.Message);
         },
-        onReset: () =>
-        {
-            Log.Information("Circuit breaker reset");
-        }));
+        onReset: () => Log.Information("Circuit breaker reset")));
 
 // Configure Health Checks
-builder.Services.AddHealthChecks()
-    .AddUrlGroup(
-        new Uri($"{builder.Configuration["ServiceUrls:ApiGateway"]}/health"),
-        name: "api-gateway",
-        failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded)
-    .AddUrlGroup(
-        new Uri($"{builder.Configuration["ServiceUrls:OrderService"]}/health"),
-        name: "orders-api",
-        failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded)
-    .AddUrlGroup(
-        new Uri($"{builder.Configuration["ServiceUrls:InventoryService"]}/health"),
-        name: "inventory-api",
-        failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded);
+var healthChecks = builder.Services.AddHealthChecks();
+
+// Add health checks from configuration
+foreach (var endpoint in builder.Configuration.GetSection("HealthChecks:Endpoints").GetChildren())
+{
+    var name = endpoint["Name"];
+    var url = endpoint["Url"];
+    if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(url))
+    {
+        healthChecks.AddUrlGroup(
+            new Uri(url),
+            name: name.ToLowerInvariant(),
+            failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded);
+    }
+}
 
 var app = builder.Build();
 
@@ -134,23 +149,19 @@ app.UseHealthChecks("/health", new HealthCheckOptions
     }
 });
 
-// Use existing observability middleware
 app.UseInsightOpsObservability();
-
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthorization();
 
-// Map SignalR hub
 app.MapHub<MetricsHub>("/metrics-hub");
-
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
 
 try
 {
-    Log.Information("Starting FrontendService...");
+    Log.Information("Starting {ServiceName}...", serviceName);
     await app.RunAsync();
 }
 catch (Exception ex)

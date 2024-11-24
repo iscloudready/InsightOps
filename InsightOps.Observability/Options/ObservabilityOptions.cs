@@ -15,11 +15,17 @@ public class ObservabilityOptions
     public EnvironmentOptions Docker { get; set; } = new();
     public GrafanaOptions Grafana { get; set; } = new();
 
-    // Flat properties for direct references
-    public string LokiUrl { get; set; }
-    public string TempoEndpoint { get; set; }
-    public string MetricsEndpoint { get; set; }
-    public bool EnableDetailedMetrics { get; set; }
+    // Add new options
+    public DataProtectionOptions DataProtection { get; set; } = new();
+    public HttpClientOptions HttpClient { get; set; } = new();
+    public SignalROptions SignalR { get; set; } = new();
+    public ApplicationOptions Application { get; set; } = new();
+
+    // Remove these as they're duplicates of what's in CommonOptions and InfrastructureOptions
+    // public string LokiUrl { get; set; }
+    // public string TempoEndpoint { get; set; }
+    // public string MetricsEndpoint { get; set; }
+    // public bool EnableDetailedMetrics { get; set; }
 }
 
 public class GrafanaOptions
@@ -67,3 +73,42 @@ public class ServiceEndpoints
     public string OrderService { get; set; } = string.Empty;
     public string InventoryService { get; set; } = string.Empty;
 }
+
+public class DataProtectionOptions
+{
+    public string Keys { get; set; } = "/app/Keys";
+    public int KeyLifetimeDays { get; set; } = 90;
+}
+
+public class HttpClientOptions
+{
+    public int RetryCount { get; set; } = 5;
+    public int RetryDelayMs { get; set; } = 100;
+    public int CircuitBreakerThreshold { get; set; } = 10;
+    public int CircuitBreakerDelay { get; set; } = 5;
+    public int TimeoutSeconds { get; set; } = 30;
+    public ApiGatewayOptions ApiGateway { get; set; } = new();
+
+    public class ApiGatewayOptions
+    {
+        public string Accept { get; set; } = "application/json";
+    }
+}
+
+public class SignalROptions
+{
+    public int MaximumReceiveMessageSize { get; set; } = 102400;
+    public bool DetailedErrors { get; set; } = true;
+}
+
+public class JsonSerializerOptions
+{
+    public bool PropertyNameCaseInsensitive { get; set; } = true;
+    public bool UsePropertyNamingPolicy { get; set; } = false;
+}
+
+public class ApplicationOptions
+{
+    public JsonSerializerOptions JsonOptions { get; set; } = new();
+}
+
