@@ -21,6 +21,10 @@ public class ObservabilityOptions
     public SignalROptions SignalR { get; set; } = new();
     public ApplicationOptions Application { get; set; } = new();
 
+    //public InfrastructureOptions Infrastructure { get; set; } = new();
+
+    //public ServiceEndpoints Service { get; set; } = new();
+
     // Remove these as they're duplicates of what's in CommonOptions and InfrastructureOptions
     // public string LokiUrl { get; set; }
     // public string TempoEndpoint { get; set; }

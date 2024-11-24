@@ -14,7 +14,7 @@
       "launchBrowser": true,
       "launchUrl": "{Scheme}://{ServiceHost}:{ServicePort}/",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_ENVIRONMENT": "Docker",
         "ASPNETCORE_HTTP_PORTS": "5100"
       },
       "publishAllPorts": true
