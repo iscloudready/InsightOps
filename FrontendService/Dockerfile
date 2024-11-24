@@ -17,30 +17,18 @@ RUN apt-get update \
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-
-# Clear NuGet cache and restore dependencies
-RUN dotnet nuget locals all --clear
-COPY ["FrontendService.csproj", "./"]
-RUN dotnet restore "FrontendService.csproj" --verbosity detailed || (echo "Restore failed. Check dependencies." && exit 1)
-
-# Copy source files and configuration files
+COPY ["FrontendService.csproj", "."]
+RUN dotnet restore "FrontendService.csproj"
 COPY . .
-COPY appsettings.json ./appsettings.json
-COPY appsettings.Development.json ./appsettings.Development.json
-COPY appsettings.Docker.json ./appsettings.Docker.json
-
-# Build the application
-RUN dotnet build "FrontendService.csproj" -c Release -o /app/build --verbosity detailed || (echo "Build failed. Check errors above." && exit 1)
+RUN dotnet build "FrontendService.csproj" -c Release -o /app/build
 
 # Publish stage
 FROM build AS publish
-RUN dotnet publish "FrontendService.csproj" -c Release -o /app/publish /p:UseAppHost=false --verbosity detailed || (echo "Publish failed. Check errors above." && exit 1)
+RUN dotnet publish "FrontendService.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
 # Final stage
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
+FROM base AS final
 WORKDIR /app
-
-# Copy published output to final container
 COPY --from=publish /app/publish .
 
 # Create keys directory with proper permissions

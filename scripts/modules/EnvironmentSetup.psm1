@@ -231,7 +231,7 @@ datasources:
 
 function Get-DockerComposeConfig {
     return @'
-name: insightops
+version: '3'
 
 x-logging: &default-logging
   driver: "json-file"
@@ -246,6 +246,7 @@ x-healthcheck: &default-healthcheck
   start_period: 30s
 
 services:
+  # Infrastructure Components
   postgres:
     image: postgres:13
     container_name: ${NAMESPACE:-insightops}_db
@@ -264,102 +265,6 @@ services:
       retries: 5
       start_period: 30s
     logging: *default-logging
-
-  orderservice:
-    build:
-      context: ../OrderService
-      dockerfile: Dockerfile
-    container_name: ${NAMESPACE:-insightops}_orderservice
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Docker
-      - ASPNETCORE_HTTP_PORTS=80
-      - ASPNETCORE_URLS=http://+:80
-      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
-    volumes:
-      - ${PROJECT_ROOT:-..}/OrderService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
-    ports:
-      - "${ORDERSERVICE_PORT:-7265}:80"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
-      interval: 30s
-      timeout: 30s
-      retries: 3
-      start_period: 40s
-
-  inventoryservice:
-    build:
-      context: ../InventoryService
-      dockerfile: Dockerfile
-    container_name: ${NAMESPACE:-insightops}_inventoryservice
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Docker
-      - ASPNETCORE_URLS=http://+:80
-      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
-    volumes:
-      - ${PROJECT_ROOT:-..}/InventoryService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
-    ports:
-      - "${INVENTORYSERVICE_PORT:-7070}:80"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
-      interval: 30s
-      timeout: 30s
-      retries: 3
-      start_period: 40s
-
-  apigateway:
-    build:
-      context: ../ApiGateway
-      dockerfile: Dockerfile
-    container_name: ${NAMESPACE:-insightops}_apigateway
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Docker
-      - ASPNETCORE_URLS=http://+:80
-    volumes:
-      - ${PROJECT_ROOT:-..}/ApiGateway/appsettings.Docker.json:/app/appsettings.Docker.json:ro
-    ports:
-      - "${APIGATEWAY_PORT:-7237}:80"
-    depends_on:
-      orderservice:
-        condition: service_healthy
-      inventoryservice:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
-      interval: 30s
-      timeout: 30s
-      retries: 3
-      start_period: 40s
-
-  frontend:
-    build:
-      context: ../FrontendService
-      dockerfile: Dockerfile
-    container_name: ${NAMESPACE:-insightops}_frontend
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Docker
-      - ASPNETCORE_URLS=http://+:80
-      - DataProtection__Keys=/app/Keys
-    user: "1001:1001" 
-    volumes:
-      - ${PROJECT_ROOT:-..}/FrontendService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
-      - keys_data:/app/Keys
-    ports:
-      - "${FRONTEND_PORT:-5010}:80"
-    depends_on:
-      apigateway:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
-      interval: 30s
-      timeout: 30s
-      retries: 3
-      start_period: 40s
 
   grafana:
     image: grafana/grafana:latest
@@ -380,6 +285,8 @@ services:
       <<: *default-healthcheck
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health"]
     logging: *default-logging
+    depends_on:
+      - postgres
 
   prometheus:
     image: prom/prometheus:latest
@@ -393,6 +300,8 @@ services:
       <<: *default-healthcheck
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
     logging: *default-logging
+    depends_on:
+      - postgres
 
   loki:
     image: grafana/loki:2.9.3
@@ -411,6 +320,8 @@ services:
       retries: 5
       start_period: 60s
     logging: *default-logging
+    depends_on:
+      - postgres
 
   tempo:
     image: grafana/tempo:latest
@@ -432,6 +343,101 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    logging: *default-logging
+    depends_on:
+      - postgres
+
+  # Application Microservices
+  orderservice:
+    build:
+      context: ../OrderService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_orderservice
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_HTTP_PORTS=80
+      - ASPNETCORE_URLS=http://+:80
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+    volumes:
+      - ${PROJECT_ROOT:-..}/OrderService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+    ports:
+      - "${ORDERSERVICE_PORT:-7265}:80"
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+
+  inventoryservice:
+    build:
+      context: ../InventoryService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_inventoryservice
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+    volumes:
+      - ${PROJECT_ROOT:-..}/InventoryService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+    ports:
+      - "${INVENTORYSERVICE_PORT:-7070}:80"
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+
+  apigateway:
+    build:
+      context: ../ApiGateway
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_apigateway
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
+    volumes:
+      - ${PROJECT_ROOT:-..}/ApiGateway/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+    ports:
+      - "${APIGATEWAY_PORT:-7237}:80"
+    depends_on:
+      - orderservice
+      - inventoryservice
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ../FrontendService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_frontend
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
+      - DataProtection__Keys=/app/Keys
+    user: "1001:1001"
+    volumes:
+      - ${PROJECT_ROOT:-..}/FrontendService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - keys_data:/app/Keys
+    ports:
+      - "${FRONTEND_PORT:-5010}:80"
+    depends_on:
+      - apigateway
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
 
 volumes:
   postgres_data:
