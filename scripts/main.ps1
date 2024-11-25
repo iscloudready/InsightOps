@@ -3,18 +3,57 @@
 
 $ErrorActionPreference = "Stop"
 $script:BASE_PATH = $PSScriptRoot
+$script:PROJECT_ROOT = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+# Ensure PROJECT_ROOT contains "InsightOps"
+if (-not ($script:PROJECT_ROOT -like "*InsightOps*")) {
+    $script:PROJECT_ROOT = Join-Path $script:PROJECT_ROOT "InsightOps"
+}
+
 $script:MODULE_PATH = Join-Path $BASE_PATH "Modules"
+$script:CONFIG_PATH = Join-Path $script:PROJECT_ROOT "Configurations"
+
+$env:BASE_PATH = $script:BASE_PATH
+$env:PROJECT_ROOT = $script:PROJECT_ROOT
 $env:MODULE_PATH = $script:MODULE_PATH
 $env:CONFIG_PATH = $script:CONFIG_PATH
+
+# Verify paths
+Write-Host "Path Configuration:" -ForegroundColor Cyan
+Write-Host "BASE_PATH:    $script:BASE_PATH" -ForegroundColor Yellow
+Write-Host "PROJECT_ROOT: $script:PROJECT_ROOT" -ForegroundColor Yellow
+Write-Host "MODULE_PATH:  $script:MODULE_PATH" -ForegroundColor Yellow
+Write-Host "CONFIG_PATH:  $script:CONFIG_PATH" -ForegroundColor Yellow
 
 # Import the Core module
 Import-Module (Join-Path $script:MODULE_PATH "Core.psm1") -Force
 
-# Set the CONFIG_PATH environment variable
-$env:CONFIG_PATH = $CONFIG_PATH
-
 # Now import the Monitoring module
 Import-Module (Join-Path $script:MODULE_PATH "Monitoring.psm1") -Force
+
+# Verify services directories
+$services = @(
+    "FrontendService",
+    "ApiGateway",
+    "OrderService",
+    "InventoryService",
+    "InsightOps.Observability"
+)
+
+Write-Host "`nVerifying service directories:" -ForegroundColor Cyan 
+$allValid = $true 
+foreach ($service in $services) { 
+    $servicePath = Join-Path $script:PROJECT_ROOT $service 
+    if (Test-Path $servicePath) { 
+        Write-Host "[OK] Found $service" -ForegroundColor Green 
+    } else { 
+        Write-Host "[X] Missing $service" -ForegroundColor Red 
+        $allValid = $false 
+    } 
+}
+
+if (-not $allValid) {
+    Write-Warning "Some service directories are missing. Please verify your project structure."
+}
 
 # Helper function to check prerequisites before starting services
 function Test-Prerequisites {
@@ -215,7 +254,6 @@ function Show-Menu {
     Write-Host "`nEnter your choice (0-29): " -ForegroundColor Yellow -NoNewline
 }
 
-# Helper function for command help
 function Get-CommandHelp {
     param (
         [Parameter(Mandatory = $true)]
@@ -257,117 +295,77 @@ function Get-CommandHelp {
         "23" { "Resets environment to initial state while preserving essential data" }
 
         # Access & Configuration
-        "24" { @"
-Opens service URLs in default browser including:
-- Grafana (http://localhost:3001)
-- Prometheus (http://localhost:9091)
-- Loki (http://localhost:3101)
-- Tempo (http://localhost:4317)
-- Frontend and API endpoints
-"@ }
-        "25" { @"
-Configures Grafana dashboards:
-- Provisions default dashboards
-- Sets up data sources
-- Configures alerting
-- Validates configurations
-"@ }
-        "26" { @"
-Manages service settings:
-- Environment variables
-- Connection strings
-- Service endpoints
-- Runtime configurations
-"@ }
+        "24" { "Opens service URLs in default browser for Grafana (3001), Prometheus (9091), Loki (3101), Tempo (4317), and service endpoints" }
+        "25" { "Configures Grafana dashboards, sets up data sources, and validates configurations" }
+        "26" { "Manages environment variables, connection strings, service endpoints, and runtime configurations" }
 
         # System Information
-        "27" { @"
-Displays environment status:
-- Docker system info
-- Service health states
-- Resource utilization
-- Configuration status
-"@ }
-        "28" { @"
-Shows service dependencies:
-- Service startup order
-- Required connections
-- Network dependencies
-- Volume dependencies
-"@ }
-        "29" { @"
-Displays configuration paths:
-- Base configuration path
-- Service-specific configs
-- Log file locations
-- Volume mount points
-"@ }
+        "27" { "Displays Docker system info, service health states, resource utilization, and configuration status" }
+        "28" { "Shows service startup order, required connections, network and volume dependencies" }
+        "29" { "Lists configuration paths, service-specific configs, log locations, and volume mount points" }
 
         # Default case
         default { @"
 No specific help available for this command.
-Type numbers 1-29 to get help for specific commands.
 
 General categories:
-1-5:   Setup and Prerequisites
-6-9:   Service Operations
-10-15: Monitoring and Health
-16-19: Logging and Debugging
-20-23: Maintenance
-24-26: Access and Configuration
-27-29: System Information
-"@ }
+* 1-5:   Setup and Prerequisites
+* 6-9:   Service Operations
+* 10-15: Monitoring and Health
+* 16-19: Logging and Debugging
+* 20-23: Maintenance
+* 24-26: Access and Configuration
+* 27-29: System Information
+"@
+        }
     }
 
     # Display the help
-    Write-Host ""
-    Write-Host "Help for Option $($Number)" -ForegroundColor Cyan
+    Write-Host "`nHelp for Option $Number" -ForegroundColor Cyan
     Write-Host "===================" -ForegroundColor Cyan
     Write-Host $helpText -ForegroundColor White
     Write-Host ""
-    
-    # Show examples for the command if available
-    $examples = switch ($Number) {
-        "6" { @"
-Examples:
-> Start all services:
-  Just select option 6
 
-> Start with health checks:
-  1. Run option 1 first (Check Prerequisites)
-  2. Then run option 6 (Start Services)
-"@ }
-        "24" { @"
-Examples:
-> Open all URLs:
-  Just select option 24
-
-> Access specific service:
-  - Grafana: http://localhost:3001
-  - Prometheus: http://localhost:9091
-"@ }
-        # Add more examples as needed
-    }
-    
-    if ($examples) {
-        Write-Host "Examples" -ForegroundColor Yellow 
-        Write-Host "--------" -ForegroundColor Yellow
-        Write-Host $examples -ForegroundColor Gray
+    # Command-specific examples
+    switch ($Number) {
+        "6" {
+            Write-Host "Examples:" -ForegroundColor Yellow
+            Write-Host "* Start all services:" -ForegroundColor Gray
+            Write-Host "  Select option 6" -ForegroundColor Gray
+            Write-Host "`n* Start with health checks:" -ForegroundColor Gray
+            Write-Host "  1. Run option 1 (Check Prerequisites)" -ForegroundColor Gray
+            Write-Host "  2. Run option 6 (Start Services)" -ForegroundColor Gray
+        }
+        "24" {
+            Write-Host "Service URLs:" -ForegroundColor Yellow
+            Write-Host "* Grafana:     http://localhost:3001" -ForegroundColor Gray
+            Write-Host "* Prometheus:  http://localhost:9091" -ForegroundColor Gray
+            Write-Host "* Loki:        http://localhost:3101" -ForegroundColor Gray
+            Write-Host "* Tempo:       http://localhost:4317" -ForegroundColor Gray
+            Write-Host "* Frontend:    http://localhost:5010" -ForegroundColor Gray
+        }
     }
 
-    # Show related commands
-    $related = switch ($Number) {
-        "6" { "Related commands: 7 (Stop Services), 8 (Restart Services), 10 (Check Health)" }
-        "10" { "Related commands: 11 (Container Status), 12 (Resource Usage), 14 (Network Tests)" }
-        "24" { "Related commands: 10 (Health Check), 25 (Grafana Config), 26 (Service Settings)" }
-        # Add more related commands as needed
-    }
-
-    if ($related) {
-        Write-Host ""
-        Write-Host "Related Commands" -ForegroundColor Yellow
-        Write-Host "---------------" -ForegroundColor Yellow
-        Write-Host $related -ForegroundColor Gray
+    # Related commands
+    switch ($Number) {
+        "6" {
+            Write-Host "`nRelated Commands:" -ForegroundColor Yellow
+            Write-Host "* 7  - Stop Services" -ForegroundColor Gray
+            Write-Host "* 8  - Restart Services" -ForegroundColor Gray
+            Write-Host "* 10 - Check Health" -ForegroundColor Gray
+        }
+        "10" {
+            Write-Host "`nRelated Commands:" -ForegroundColor Yellow
+            Write-Host "* 11 - Container Status" -ForegroundColor Gray
+            Write-Host "* 12 - Resource Usage" -ForegroundColor Gray
+            Write-Host "* 14 - Network Tests" -ForegroundColor Gray
+        }
+        "24" {
+            Write-Host "`nRelated Commands:" -ForegroundColor Yellow
+            Write-Host "* 10 - Health Check" -ForegroundColor Gray
+            Write-Host "* 25 - Grafana Configuration" -ForegroundColor Gray
+            Write-Host "* 26 - Service Settings" -ForegroundColor Gray
+        }
     }
 }
 

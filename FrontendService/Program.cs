@@ -8,25 +8,24 @@ using FrontendService.Services;
 using InsightOps.Observability.Metrics;
 using InsightOps.Observability.Options;
 using InsightOps.Observability.SignalR;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add centralized observability with all configurations
-builder.Services.AddInsightOpsObservability(
-    builder.Configuration,
-    "FrontendService",
-    options =>
-    {
-        // Any service-specific overrides can go here if needed
-        options.Common.ServiceName = "FrontendService";
-    });
+// Configure Serilog first
+builder.Host.UseSerilog((context, config) =>
+    config.ReadFrom.Configuration(context.Configuration));
 
-// Explicitly register required services for MetricsBackgroundService
+// Register services from the Observability package
 builder.Services.Configure<ObservabilityOptions>(builder.Configuration.GetSection("Observability"));
-builder.Services.AddSingleton<RealTimeMetricsCollector>();
-builder.Services.AddSingleton<SystemMetricsCollector>();
+builder.Services.AddSingleton<InsightOps.Observability.Metrics.RealTimeMetricsCollector>();
+builder.Services.AddSingleton<InsightOps.Observability.Metrics.SystemMetricsCollector>();
 
-// Add SignalR
+// If you have local monitoring services, register them as well
+//builder.Services.AddSingleton<FrontendService.Services.Monitoring.MetricsCollector>();
+//builder.Services.AddSingleton<FrontendService.Services.Monitoring.SystemMetricsCollector>();
+
+// Configure SignalR
 builder.Services.AddSignalR(options =>
 {
     var signalRConfig = builder.Configuration.GetSection("SignalR").Get<SignalROptions>();
@@ -34,18 +33,32 @@ builder.Services.AddSignalR(options =>
     options.MaximumReceiveMessageSize = signalRConfig?.MaximumReceiveMessageSize ?? 102400;
 });
 
-// Register BackgroundService
-builder.Services.AddHostedService<MetricsBackgroundService>();
+// Add centralized observability
+builder.Services.AddInsightOpsObservability(
+    builder.Configuration,
+    "FrontendService",
+    options =>
+    {
+        options.Common.ServiceName = "FrontendService";
+    });
 
-// Register application-specific services
+// Register application services
+builder.Services.AddHostedService<MetricsBackgroundService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
 
-// Add controllers with default JSON options (handled by observability stack)
-builder.Services.AddControllersWithViews();
+// Configure MVC
+builder.Services.AddControllersWithViews()
+    .AddJsonOptions(options =>
+    {
+        var jsonConfig = builder.Configuration.GetSection("Application:JsonOptions").Get<InsightOps.Observability.Options.JsonSerializerOptions>();
+        options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+        options.JsonSerializerOptions.PropertyNamingPolicy = null;
+    });
 
 var app = builder.Build();
 
+// Configure error handling
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
@@ -55,26 +68,30 @@ else
     app.UseExceptionHandler("/Home/Error");
 }
 
-// Ensure proper middleware order
+// Configure the HTTP request pipeline
 app.UseRouting();
-
-// Use centralized observability middleware (includes health checks, metrics, etc.)
-app.UseInsightOpsObservability();
-
-// Standard ASP.NET Core middleware
 app.UseStaticFiles();
-//app.UseRouting();
-// app.UseAuthentication();
 app.UseAuthorization();
 
-// Map SignalR hub
-app.MapHub<MetricsHub>("/metrics-hub");
+// Use centralized observability middleware
+app.UseInsightOpsObservability();
 
-// Map default controller route
-app.MapControllerRoute(
-    name: "default",
-    pattern: "{controller=Home}/{action=Index}/{id?}");
+// Configure endpoints
+app.UseEndpoints(endpoints =>
+{
+    // Map SignalR hub
+    endpoints.MapHub<MetricsHub>("/metrics-hub");
 
+    // Map controllers
+    endpoints.MapControllerRoute(
+        name: "default",
+        pattern: "{controller=Home}/{action=Index}/{id?}");
+
+    // Map health checks (if not handled by UseInsightOpsObservability)
+    endpoints.MapHealthChecks("/health");
+});
+
+// Start the application
 try
 {
     Log.Information("Starting FrontendService...");

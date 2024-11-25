@@ -17,8 +17,12 @@ RUN apt-get update \
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
+
+# Copy just the csproj first
 COPY ["FrontendService.csproj", "."]
 RUN dotnet restore "FrontendService.csproj"
+
+# Copy remaining files
 COPY . .
 RUN dotnet build "FrontendService.csproj" -c Release -o /app/build
 

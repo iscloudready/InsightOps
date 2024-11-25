@@ -71,8 +71,9 @@
 
 	<ItemGroup>
 		<!-- Reference to the Observability library -->
-		<ProjectReference Include="..\InsightOps.Observability\Observability.csproj" />
-		<ProjectReference Include="..\SharedModels\SharedModels.csproj" />
+		<ProjectReference Include="..\InsightOps.Observability\Observability.csproj">
+			<PrivateAssets>none</PrivateAssets>
+		</ProjectReference>
 	</ItemGroup>
 
 </Project>

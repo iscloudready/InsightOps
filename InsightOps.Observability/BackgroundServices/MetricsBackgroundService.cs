@@ -34,8 +34,23 @@ namespace InsightOps.Observability.BackgroundServices
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                // Collect metrics and log them periodically
-                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+                try
+                {
+                    var systemMetrics = _systemMetrics.GetSystemMetrics();
+                    var metrics = _metricsCollector.GetEndpointMetrics();
+
+                    await _hubContext.Clients.All.SendAsync("MetricsUpdated", new
+                    {
+                        System = systemMetrics,
+                        Endpoints = metrics
+                    }, stoppingToken);
+
+                    await Task.Delay(TimeSpan.FromSeconds(_options.Value.Common.MetricsInterval), stoppingToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "Error collecting metrics");
+                }
             }
         }
     }

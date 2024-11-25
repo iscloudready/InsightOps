@@ -253,8 +253,12 @@ Function Initialize-Monitoring {
 
     # Restart Grafana container
     Write-Host "Restarting Grafana container..."
-    docker restart insightops_grafana
-    Write-Host "Grafana container restarted successfully."
+    if (docker ps -a --format "{{.Names}}" | Select-String -Pattern "insightops_grafana" -Quiet) {
+        docker restart insightops_grafana
+        Write-Host "Grafana container restarted successfully."
+    } else {
+        Write-Host "Grafana container does not exist."
+    }
 }
 
 function Provision-Dashboard {

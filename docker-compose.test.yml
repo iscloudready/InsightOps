@@ -1,0 +1,21 @@
+version: '3'
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: FrontendService/Dockerfile
+    container_name: insightops_frontend_test
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
+      - DataProtection__Keys=/app/Keys
+    volumes:
+      - ./FrontendService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - ./Configurations/DataProtectionKeys:/app/Keys
+    ports:
+      - "5010:80"
+
+networks:
+  default:
+    name: insightops_test_network

@@ -10,27 +10,32 @@ using System.Collections.Generic;
 using System.Linq;
 using FrontendService.Models.DTOs;
 using System.Net.Http.Json;
-using FrontendService.Services.Monitoring;
+using InsightOps.Observability.Metrics;  // Use the observability package metrics
+//using FrontendService.Services.Monitoring;
 using System.Text.Json;
 using Polly.CircuitBreaker;
+using FrontendService.Extensions;
 
 public class HomeController : Controller
 {
     private readonly IHttpClientFactory _clientFactory;
     private readonly ILogger<HomeController> _logger;
     private readonly IConfiguration _configuration;
-    private readonly SystemMetricsCollector _metricsCollector;
+    private readonly InsightOps.Observability.Metrics.SystemMetricsCollector _systemMetrics;
+    private readonly InsightOps.Observability.Metrics.RealTimeMetricsCollector _realTimeMetrics;
 
     public HomeController(
         IHttpClientFactory clientFactory,
         ILogger<HomeController> logger,
         IConfiguration configuration,
-        SystemMetricsCollector metricsCollector)
+        SystemMetricsCollector systemMetrics,
+        RealTimeMetricsCollector realTimeMetrics)
     {
         _clientFactory = clientFactory;
         _logger = logger;
         _configuration = configuration;
-        _metricsCollector = metricsCollector;
+        _systemMetrics = systemMetrics;
+        _realTimeMetrics = realTimeMetrics;
     }
 
     [HttpGet]
@@ -59,7 +64,7 @@ public class HomeController : Controller
             client.BaseAddress = new Uri(baseUrl);
 
             // Get real system metrics
-            var systemMetrics = _metricsCollector.GetSystemMetrics();
+            var systemMetrics = _systemMetrics.GetSystemMetrics();
             _logger.LogInformation("System Metrics - CPU: {CPU}%, Memory: {Memory}%, Storage: {Storage}%",
                 systemMetrics.CpuUsage,
                 systemMetrics.MemoryUsage,
@@ -140,12 +145,12 @@ public class HomeController : Controller
                     _logger.LogWarning("Inventory API error response: {Error}", errorContent);
                 }
 
-                // Record metrics
-                _metricsCollector.RecordMetric("api_response_time", responseTime);
-                _metricsCollector.RecordMetric("active_orders", orders.Count);
-                _metricsCollector.RecordMetric("inventory_items", inventory.Count);
+                // Record metrics using RealTimeMetricsCollector
+                _realTimeMetrics.RecordCustomMetric("api_response_time", responseTime);
+                _realTimeMetrics.RecordCustomMetric("active_orders", orders.Count);
+                _realTimeMetrics.RecordCustomMetric("inventory_items", inventory.Count);
 
-                _logger.LogInformation("Preparing dashboard response data");
+                var requestRate = _realTimeMetrics.GetCustomRequestRate();
 
                 // Generate response data
                 var data = new
@@ -168,7 +173,7 @@ public class HomeController : Controller
                     cpuUsage = systemMetrics.CpuUsage,
                     memoryUsage = systemMetrics.MemoryUsage,
                     storageUsage = systemMetrics.StorageUsage,
-                    requestRate = _metricsCollector.GetRequestRate(),
+                    requestRate = requestRate,
                     errorRate = apiHealthy ? 0 : 100,
 
                     // For debugging
@@ -180,18 +185,13 @@ public class HomeController : Controller
                         healthy = apiHealthy
                     },
 
-                    // Trend data (if APIs are healthy)
+                    // Trend data
                     orderTrends = apiHealthy ? await GetOrderTrends(orders) : GenerateOrderTrends(),
                     inventoryTrends = apiHealthy ? await GetInventoryTrends(inventory) : GenerateInventoryTrends(),
 
                     // Last update time
                     lastUpdated = DateTime.UtcNow
                 };
-
-                _logger.LogInformation("Dashboard data generated successfully. API Status: {Status}, Orders: {OrderCount}, Inventory: {InventoryCount}",
-                    apiHealthy ? "Healthy" : "Degraded",
-                    orders.Count,
-                    inventory.Count);
 
                 return Json(data);
             }
@@ -215,8 +215,7 @@ public class HomeController : Controller
         {
             _logger.LogWarning("Circuit breaker is open, returning fallback data");
 
-            // Return basic data that doesn't require API calls
-            var systemMetrics = _metricsCollector.GetSystemMetrics();
+            var systemMetrics = _systemMetrics.GetSystemMetrics();
             return Json(new
             {
                 activeOrders = 0,

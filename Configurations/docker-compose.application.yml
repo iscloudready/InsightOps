@@ -182,29 +182,7 @@ services:
       retries: 3
       start_period: 40s
 
-  frontend:
-    build:
-      context: ../FrontendService
-      dockerfile: Dockerfile
-    container_name: ${NAMESPACE:-insightops}_frontend
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Docker
-      - ASPNETCORE_URLS=http://+:80
-      - DataProtection__Keys=/app/Keys
-    user: "1001:1001"
-    volumes:
-      - ${PROJECT_ROOT:-..}/FrontendService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
-      - keys_data:/app/Keys
-    ports:
-      - "${FRONTEND_PORT:-5010}:80"
-    depends_on:
-      - apigateway
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
-      interval: 30s
-      timeout: 30s
-      retries: 3
-      start_period: 40s
+
 
 volumes:
   postgres_data:

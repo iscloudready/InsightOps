@@ -14,6 +14,7 @@ $script:CONFIG_PATH = (Get-Variable -Name CONFIG_PATH -Scope Global).Value
 $script:REQUIRED_PATHS = (Get-Variable -Name REQUIRED_PATHS -Scope Global).Value
 $script:REQUIRED_FILES = (Get-Variable -Name REQUIRED_FILES -Scope Global).Value
 $script:NAMESPACE = (Get-Variable -Name NAMESPACE -Scope Global).Value
+$script:PROJECT_ROOT = $env:PROJECT_ROOT
 
 # Define a path on your host with full permissions for Docker to use
 # Define a path dynamically for Docker volumes using CONFIG_PATH
@@ -229,7 +230,685 @@ datasources:
 '@
 }
 
+function Get-InfrastructureDockerComposeConfig {
+    return @'
+version: '3'
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-healthcheck: &default-healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
+services:
+  # Infrastructure Components
+  postgres:
+    image: postgres:13
+    container_name: ${NAMESPACE:-insightops}_db
+    environment:
+      POSTGRES_USER: ${DB_USER:-insightops_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-insightops_pwd}
+      POSTGRES_DB: ${DB_NAME:-insightops_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-insightops_user} -d ${DB_NAME:-insightops_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ${NAMESPACE:-insightops}_grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-InsightOps2024!}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/overview.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ${CONFIG_PATH}/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ${CONFIG_PATH}/grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health"]
+    logging: *default-logging
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ${NAMESPACE:-insightops}_prometheus
+    volumes:
+      - ${CONFIG_PATH}/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+    logging: *default-logging
+
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: ${NAMESPACE:-insightops}_loki
+    user: "root"
+    volumes:
+      - ${CONFIG_PATH}/loki/loki-config.yaml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+      - ${CONFIG_PATH}/loki_wal:/loki/wal
+    ports:
+      - "${LOKI_PORT:-3101}:3100"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    logging: *default-logging
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: ${NAMESPACE:-insightops}_tempo
+    user: root
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    environment:
+      - TEMPO_LOG_LEVEL=debug
+    volumes:
+      - ${CONFIG_PATH}/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "${TEMPO_PORT:-4317}:4317"
+      - "${TEMPO_HTTP_PORT:-4318}:4318"
+      - "3200:3200"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3200/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+    name: ${NAMESPACE:-insightops}_postgres_data
+  grafana_data:
+    name: ${NAMESPACE:-insightops}_grafana_data
+  prometheus_data:
+    name: ${NAMESPACE:-insightops}_prometheus_data
+  loki_data:
+    name: ${NAMESPACE:-insightops}_loki_data
+  tempo_data:
+    name: ${NAMESPACE:-insightops}_tempo_data
+  loki_wal:
+    name: ${NAMESPACE:-insightops}_loki_wal
+
+networks:
+  default:
+    name: ${NAMESPACE:-insightops}_infra_network
+    driver: bridge
+'@
+}
+
+function Get-ApplicationDockerComposeConfig {
+    return @'
+version: '3'
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  orderservice:
+    build:
+      context: ${PROJECT_ROOT}/OrderService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_orderservice
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+      - Observability__Tempo__Endpoint=http://tempo:4317
+      - Observability__Loki__Endpoint=http://loki:3100
+      - Observability__Prometheus__Endpoint=http://prometheus:9090
+    networks:
+      - default
+      - infrastructure
+    volumes:
+      - ${PROJECT_ROOT:-..}/OrderService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+    ports:
+      - "${ORDERSERVICE_PORT:-7265}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+
+  inventoryservice:
+    build:
+      context: ${PROJECT_ROOT}/InventoryService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_inventoryservice
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+      - Observability__Tempo__Endpoint=http://tempo:4317
+      - Observability__Loki__Endpoint=http://loki:3100
+      - Observability__Prometheus__Endpoint=http://prometheus:9090
+    networks:
+      - default
+      - infrastructure
+    volumes:
+      - ${PROJECT_ROOT:-..}/InventoryService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+    ports:
+      - "${INVENTORYSERVICE_PORT:-7070}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+
+  apigateway:
+    build:
+      context: ${PROJECT_ROOT}/ApiGateway
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_apigateway
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
+      - Observability__Tempo__Endpoint=http://tempo:4317
+      - Observability__Loki__Endpoint=http://loki:3100
+      - Observability__Prometheus__Endpoint=http://prometheus:9090
+    networks:
+      - default
+      - infrastructure
+    volumes:
+      - ${PROJECT_ROOT:-..}/ApiGateway/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+    ports:
+      - "${APIGATEWAY_PORT:-7237}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ${PROJECT_ROOT}/FrontendService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_frontend
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
+      - DataProtection__Keys=/app/Keys
+      - Observability__Tempo__Endpoint=http://tempo:4317
+      - Observability__Loki__Endpoint=http://loki:3100
+      - Observability__Prometheus__Endpoint=http://prometheus:9090
+    user: "1001:1001"
+    networks:
+      - default
+      - infrastructure
+    volumes:
+      - ${PROJECT_ROOT:-..}/FrontendService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - keys_data:/app/Keys
+    ports:
+      - "${FRONTEND_PORT:-5010}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  keys_data:
+    name: ${NAMESPACE:-insightops}_keys_data
+    driver: local
+    driver_opts:
+      type: none
+      device: ${CONFIG_PATH}/Keys
+      o: bind
+
+networks:
+  default:
+    name: ${NAMESPACE:-insightops}_app_network
+    driver: bridge
+  infrastructure:
+    external:
+      name: ${NAMESPACE:-insightops}_infra_network
+'@
+}
+
 function Get-DockerComposeConfig {
+    return @'
+version: '3'
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-healthcheck: &default-healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
+services:
+  # Infrastructure Components
+  postgres:
+    image: postgres:13
+    container_name: ${NAMESPACE:-insightops}_db
+    environment:
+      POSTGRES_USER: ${DB_USER:-insightops_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-insightops_pwd}
+      POSTGRES_DB: ${DB_NAME:-insightops_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-insightops_user} -d ${DB_NAME:-insightops_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ${NAMESPACE:-insightops}_grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-InsightOps2024!}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/overview.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ${CONFIG_PATH}/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ${CONFIG_PATH}/grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health"]
+    logging: *default-logging
+    depends_on:
+      - postgres
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ${NAMESPACE:-insightops}_prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+    logging: *default-logging
+    depends_on:
+      - postgres
+
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: ${NAMESPACE:-insightops}_loki
+    user: "root"
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+      - ${CONFIG_PATH}/loki_wal:/loki/wal
+    ports:
+      - "${LOKI_PORT:-3101}:3100"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    logging: *default-logging
+    depends_on:
+      - postgres
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: ${NAMESPACE:-insightops}_tempo
+    user: root
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    environment:
+      - TEMPO_LOG_LEVEL=debug
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "${TEMPO_PORT:-4317}:4317"
+      - "${TEMPO_HTTP_PORT:-4318}:4318"
+      - "3200:3200"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3200/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *default-logging
+    depends_on:
+      - postgres
+
+  # Application Microservices
+  orderservice:
+    build:
+      context: ../OrderService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_orderservice
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_HTTP_PORTS=80
+      - ASPNETCORE_URLS=http://+:80
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+    volumes:
+      - ${PROJECT_ROOT:-..}/OrderService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+    ports:
+      - "${ORDERSERVICE_PORT:-7265}:80"
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+
+  inventoryservice:
+    build:
+      context: ../InventoryService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_inventoryservice
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+    volumes:
+      - ${PROJECT_ROOT:-..}/InventoryService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+    ports:
+      - "${INVENTORYSERVICE_PORT:-7070}:80"
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+
+  apigateway:
+    build:
+      context: ../ApiGateway
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_apigateway
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
+    volumes:
+      - ${PROJECT_ROOT:-..}/ApiGateway/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+    ports:
+      - "${APIGATEWAY_PORT:-7237}:80"
+    depends_on:
+      - orderservice
+      - inventoryservice
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ../FrontendService
+      dockerfile: Dockerfile
+    container_name: ${NAMESPACE:-insightops}_frontend
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Docker
+      - ASPNETCORE_URLS=http://+:80
+      - DataProtection__Keys=/app/Keys
+    user: "1001:1001"
+    volumes:
+      - ${PROJECT_ROOT:-..}/FrontendService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - keys_data:/app/Keys
+    ports:
+      - "${FRONTEND_PORT:-5010}:80"
+    depends_on:
+      - apigateway
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+    name: ${NAMESPACE:-insightops}_postgres_data
+  grafana_data:
+    name: ${NAMESPACE:-insightops}_grafana_data
+  prometheus_data:
+    name: ${NAMESPACE:-insightops}_prometheus_data
+  loki_data:
+    name: ${NAMESPACE:-insightops}_loki_data
+  tempo_data:
+    name: ${NAMESPACE:-insightops}_tempo_data
+  loki_wal:
+    name: ${NAMESPACE:-insightops}_loki_wal
+  frontend_keys:
+    name: ${NAMESPACE:-insightops}_frontend_keys
+  keys_data:
+    name: ${NAMESPACE:-insightops}_keys_data
+    driver: local
+    driver_opts:
+      type: none
+      device: ${CONFIG_PATH}/Keys
+      o: bind
+
+networks:
+  default:
+    name: ${NAMESPACE:-insightops}_network
+    driver: bridge
+'@
+}
+
+# The main Get-DockerComposeConfig function can now call both
+function _Get-DockerComposeConfig {
+    param(
+        [ValidateSet("Infrastructure", "Application", "All")]
+        [string]$Type = "All"
+    )
+    
+    # Verify environment variables
+    if (-not $env:PROJECT_ROOT) { throw "PROJECT_ROOT environment variable not set" }
+    if (-not $env:CONFIG_PATH) { throw "CONFIG_PATH environment variable not set" }
+
+    # Add configuration validation
+    if (-not (Test-ComposeConfiguration)) {
+        throw "Docker compose configuration validation failed"
+    }
+
+    switch ($Type) {
+        "Infrastructure" { 
+            Write-Host "Generating infrastructure compose with config path: $env:CONFIG_PATH" -ForegroundColor Yellow
+            return Get-InfrastructureDockerComposeConfig 
+        }
+        "Application" { 
+            Write-Host "Generating application compose with project root: $env:PROJECT_ROOT" -ForegroundColor Yellow
+            return Get-ApplicationDockerComposeConfig 
+        }
+        "All" {
+            Write-Host "Generating combined compose configuration..." -ForegroundColor Yellow
+            
+            # Get individual configs
+            $infra = Get-InfrastructureDockerComposeConfig
+            $app = Get-ApplicationDockerComposeConfig
+
+            # Parse the YAML to combine properly
+            $infraYaml = $infra | ConvertFrom-Yaml
+            $appYaml = $app | ConvertFrom-Yaml
+
+            # Combine services, volumes, and networks
+            $combined = @{
+                version = '3'
+                services = @{}
+                volumes = @{}
+                networks = @{}
+            }
+
+            # Merge services
+            $infraYaml.services.Keys | ForEach-Object {
+                $combined.services[$_] = $infraYaml.services[$_]
+            }
+            $appYaml.services.Keys | ForEach-Object {
+                $combined.services[$_] = $appYaml.services[$_]
+            }
+
+            # Merge volumes
+            $infraYaml.volumes.Keys | ForEach-Object {
+                $combined.volumes[$_] = $infraYaml.volumes[$_]
+            }
+            $appYaml.volumes.Keys | ForEach-Object {
+                $combined.volumes[$_] = $appYaml.volumes[$_]
+            }
+
+            # Merge networks
+            $infraYaml.networks.Keys | ForEach-Object {
+                $combined.networks[$_] = $infraYaml.networks[$_]
+            }
+            $appYaml.networks.Keys | ForEach-Object {
+                $combined.networks[$_] = $appYaml.networks[$_]
+            }
+
+            # Convert back to YAML
+            return $combined | ConvertTo-Yaml
+        }
+    }
+}
+
+function Get-DockerComposeConfigs {
+    param(
+        [ValidateSet("Infrastructure", "Application", "All")]
+        [string]$Type = "All"
+    )
+    
+    # Verify environment variables
+    if (-not $env:PROJECT_ROOT) { throw "PROJECT_ROOT environment variable not set" }
+    if (-not $env:CONFIG_PATH) { throw "CONFIG_PATH environment variable not set" }
+
+    # Add configuration validation
+    if (-not (Test-ComposeConfiguration)) {
+        throw "Docker compose configuration validation failed"
+    }
+
+    switch ($Type) {
+        "Infrastructure" { 
+            Write-Host "Generating infrastructure compose with config path: $env:CONFIG_PATH" -ForegroundColor Yellow
+            return Get-InfrastructureDockerComposeConfig 
+        }
+        "Application" { 
+            Write-Host "Generating application compose with project root: $env:PROJECT_ROOT" -ForegroundColor Yellow
+            return Get-ApplicationDockerComposeConfig 
+        }
+        "All" {
+            Write-Host "Generating combined compose configuration..." -ForegroundColor Yellow
+            
+            return @'
+version: '3'
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-healthcheck: &default-healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
+services:
+  # Infrastructure Services
+'@ + "`n" + (Get-InfrastructureDockerComposeConfig) + "`n" + @'
+  # Application Services
+'@ + "`n" + (Get-ApplicationDockerComposeConfig)
+        }
+    }
+}
+
+function Test-ComposeConfiguration {
+    [CmdletBinding()]
+    param()
+    
+    $errors = @()
+    
+    # Check environment variables
+    if (-not $env:PROJECT_ROOT) { $errors += "PROJECT_ROOT environment variable not set" }
+    if (-not $env:CONFIG_PATH) { $errors += "CONFIG_PATH environment variable not set" }
+
+    # Check infrastructure paths
+    $infraPaths = @(
+        (Join-Path $env:CONFIG_PATH "prometheus/prometheus.yml"),
+        (Join-Path $env:CONFIG_PATH "loki/loki-config.yaml"),
+        (Join-Path $env:CONFIG_PATH "tempo/tempo.yaml")
+    )
+
+    foreach ($path in $infraPaths) {
+        if (-not (Test-Path $path)) {
+            $errors += "Missing infrastructure config: $path"
+        }
+    }
+
+    # Check application paths
+    $servicePaths = @(
+        (Join-Path $env:PROJECT_ROOT "FrontendService/Dockerfile"),
+        (Join-Path $env:PROJECT_ROOT "ApiGateway/Dockerfile"),
+        (Join-Path $env:PROJECT_ROOT "OrderService/Dockerfile"),
+        (Join-Path $env:PROJECT_ROOT "InventoryService/Dockerfile")
+    )
+
+    foreach ($path in $servicePaths) {
+        if (-not (Test-Path $path)) {
+            $errors += "Missing service file: $path"
+        }
+    }
+
+    if ($errors.Count -gt 0) {
+        Write-Host "Configuration validation errors:" -ForegroundColor Red
+        $errors | ForEach-Object { Write-Host "- $_" -ForegroundColor Red }
+        return $false
+    }
+
+    Write-Host "Configuration validation passed" -ForegroundColor Green
+    return $true
+}
+
+function GGGet-DockerComposeConfig {
     return @'
 version: '3'
 
@@ -821,165 +1500,6 @@ function Set-EnvironmentConfig {
     }
 }
 
-function Initialize-Environment {
-    param(
-        [string]$Environment = "Development",
-        [switch]$Force
-    )
-    try {
-        Write-Info "`nInitializing environment: $Environment"
-        Write-Info "Using configuration path: $script:CONFIG_PATH"
-
-                # Create all necessary monitoring directories
-        Write-Info "Creating monitoring directories..."
-        $monitoringDirs = @(
-            "src/FrontendService/Monitoring",
-            "Configurations/grafana/dashboards",
-            "Configurations/prometheus/rules"
-        )
-
-        foreach ($dir in $monitoringDirs) {
-            $fullPath = Join-Path $script:PROJECT_ROOT $dir
-            if (-not (Test-Path $fullPath)) {
-                New-Item -ItemType Directory -Path $fullPath -Force | Out-Null
-                Write-Success "  [Created] $dir"
-            } else {
-                Write-Info "  [Exists] $dir"
-            }
-        }
-
-        # Copy Monitoring module
-        $modulesPath = Join-Path $script:PROJECT_ROOT "scripts/Modules"
-        $monitoringModulePath = Join-Path $modulesPath "Monitoring.psm1"
-        if (-not (Test-Path $monitoringModulePath)) {
-            Copy-Item (Join-Path $PSScriptRoot "Monitoring.psm1") $monitoringModulePath -Force
-            Write-Success "  [Created] Monitoring.psm1 module"
-        }
-
-        # Check if loki_wal directory exists and create it if missing
-        Write-Info "Ensuring loki_wal directory exists and has correct permissions..."
-        if (-not (Test-Path -Path "$script:CONFIG_PATH\loki_wal")) {
-            New-Item -ItemType Directory -Path "$script:CONFIG_PATH\loki_wal" | Out-Null
-            Write-Success "  [Created] loki_wal directory"
-        }
-
-        # Set Docker permissions for loki_wal
-        Set-VolumePermissions -VolumePath "$script:CONFIG_PATH\loki_wal"
-        Write-Info "Permissions set for loki_wal directory"
-
-        # Ensure host volume path for Tempo data is created with permissions
-        Write-Info "Ensuring host volume path for Tempo data..."
-        Ensure-HostVolumePath -Path $hostVolumePath
-
-        # Add monitoring initialization
-        Write-Info "Initializing monitoring components..."
-        Initialize-Monitoring -ConfigPath $script:CONFIG_PATH
-
-        # Manually create paths for Docker permissions
-        Write-Info "Setting Docker permissions for data directories..."
-        $dockerPaths = @(
-            Join-Path -Path $script:CONFIG_PATH -ChildPath "postgres_data"
-            Join-Path -Path $script:CONFIG_PATH -ChildPath "grafana_data"
-            Join-Path -Path $script:CONFIG_PATH -ChildPath "prometheus_data"
-            Join-Path -Path $script:CONFIG_PATH -ChildPath "loki_data"
-            Join-Path -Path $script:CONFIG_PATH -ChildPath "tempo_data"
-        )
-        Ensure-DockerPermissions -Paths $dockerPaths
-
-        Write-Info "`nCreating required directories:"
-        foreach ($path in $script:REQUIRED_PATHS) {
-            # Replace any incorrect path references
-            $correctedPath = $path -replace "scripts\\Configurations", "Configurations"
-            Write-Info "Processing path: $correctedPath"
-
-            if (-not (Test-Path -Path $correctedPath) -or $Force) {
-                New-Item -ItemType Directory -Path $correctedPath -Force | Out-Null
-                Write-Success "  [Created] $($correctedPath.Split('\')[-1])"
-            } else {
-                Write-Info "  [Exists] $($correctedPath.Split('\')[-1])"
-            }
-
-            # Set permissions on specific data paths
-            if ($correctedPath -like "*tempo_data*" -or $correctedPath -like "*prometheus_data*" -or $correctedPath -like "*loki_data*") {
-                Set-VolumePermissions -VolumePath $correctedPath
-            }
-        }
-
-        Write-Info "`nSetting up configuration files:"
-        # Define configuration files with paths and ensure they're joined correctly
-        $configs = @(
-            @{Key = "tempo/tempo.yaml"; Value = Get-TempoConfig}
-            @{Key = "loki/loki-config.yaml"; Value = Get-LokiConfig}
-            @{Key = "prometheus/prometheus.yml"; Value = Get-PrometheusConfig}
-            @{Key = "docker-compose.yml"; Value = Get-DockerComposeConfig}
-        )
-
-        foreach ($config in $configs) {
-            # Use single Join-Path call for each file path
-            $filePath = Join-Path -Path $script:CONFIG_PATH -ChildPath $config.Key
-            Write-Info "Setting up config file: $filePath"
-
-            if (-not (Test-Path -Path $filePath) -or $Force) {
-                $directory = Split-Path -Path $filePath -Parent
-                Initialize-Directory -Path $directory
-
-                # Write with UTF8 encoding without BOM
-                $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
-                [System.IO.File]::WriteAllText($filePath, $config.Value, $utf8NoBomEncoding)
-
-                Write-Success "  [Created] $($config.Key)"
-            } else {
-                Write-Info "  [Exists] $($config.Key)"
-            }
-        }
-
-        try {
-            Write-Host "Updating prometheus config with windows exporter settings..." -ForegroundColor Yellow
-            $exporterPort = 9182
-            Write-Host "Exporter port: $exporterPort"
-
-            # Set the system IP and exporter port
-            $systemIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.PrefixOrigin -eq 'Dhcp' -or $_.PrefixOrigin -eq 'Manual' }).IPAddress | Select-Object -First 1
-            Write-Host "System IP address: $systemIp"
-
-            $exporterUrl = "http://${systemIp}:${exporterPort}/metrics"
-            Write-Host "Exporter URL: $exporterUrl"
-
-            $prometheusUrlCheck = "http://${systemIp}:9090/metrics"
-            Write-Host "Prometheus URL check: $prometheusUrlCheck"
-
-            # Update the Prometheus configuration file
-            Update-PrometheusConfigFile -systemIp $systemIp -exporterPort $exporterPort
-            Write-Host "Prometheus configuration file updated successfully."
-        } catch {
-            Write-Host "An error occurred: $($Error[0].Message)"
-            Write-Host "Error details: $($Error[0].Exception.ToString())"
-        }
-
-        Write-Info "Setting environment configuration..."
-        if (Set-EnvironmentConfig -Environment $Environment -Force:$Force) {
-            Write-Success "  [OK] Created .env.$Environment"
-        }
-
-        Write-Info "`nInitializing Grafana configurations..."
-
-        # Create Grafana directory structure
-        $grafanaPath = Join-Path $script:CONFIG_PATH "grafana"
-        $grafanaDirs = @(
-            "$grafanaPath\provisioning\dashboards"
-            "$grafanaPath\provisioning\datasources"
-            "$grafanaPath\dashboards"
-        )
-
-        # Create directories if they don't exist
-        foreach ($dir in $grafanaDirs) {
-            if (-not (Test-Path $dir)) {
-                New-Item -ItemType Directory -Path $dir -Force | Out-Null
-                Write-Success "  [Created] Grafana directory: $($dir.Split('\')[-1])"
-            } else {
-                Write-Info "  [Exists] Grafana directory: $($dir.Split('\')[-1])"
-            }
-        }
 $dashboardProvisionConfig = @'
 apiVersion: 1
 providers:
@@ -1121,6 +1641,188 @@ $sampleDashboard = @'
   "version": 1
 }
 '@
+
+function Initialize-Environment {
+    param(
+        [string]$Environment = "Development",
+        [switch]$Force
+    )
+    try {
+        # Set up logging
+        $outputFile = Join-Path $env:CONFIG_PATH "environment_init.log"
+        Write-Host "Logging detailed output to: $outputFile" -ForegroundColor Cyan
+        
+        # Start logging
+        Start-Transcript -Path $outputFile -Append
+
+        Write-Info "`nInitializing environment: $Environment"
+        Write-Info "Using configuration path: $script:CONFIG_PATH"
+
+        Write-Host "BASE_PATH:    $env:BASE_PATH" -ForegroundColor Yellow
+        Write-Host "PROJECT_ROOT: $env:PROJECT_ROOT" -ForegroundColor Yellow
+        Write-Host "MODULE_PATH:  $env:MODULE_PATH" -ForegroundColor Yellow
+        Write-Host "CONFIG_PATH:  $env:CONFIG_PATH" -ForegroundColor Yellow
+
+        # Create all necessary monitoring directories
+        Write-Info "Creating monitoring directories..." | Tee-Object -Append -FilePath $outputFile
+        $monitoringDirs = @(
+            "src/FrontendService/Monitoring",
+            "Configurations/grafana/dashboards",
+            "Configurations/prometheus/rules"
+        )
+
+        foreach ($dir in $monitoringDirs) {
+            $fullPath = Join-Path $script:PROJECT_ROOT $dir
+            if (-not (Test-Path $fullPath)) {
+                New-Item -ItemType Directory -Path $fullPath -Force | Out-Null
+                Write-Success "  [Created] $dir" | Tee-Object -Append -FilePath $outputFile
+            } else {
+                Write-Info "  [Exists] $dir" | Tee-Object -Append -FilePath $outputFile
+            }
+        }
+
+        Write-Info "Monitoring directories created successfully."
+        Write-Info "Proceeding with environment initialization..."
+
+        # Copy Monitoring module
+        #$modulesPath = Join-Path $script:PROJECT_ROOT "InsightOps\scripts\modules"
+        $monitoringModulePath = Join-Path $env:MODULE_PATH "Monitoring.psm1"
+        Write-Info "Monitoring Module Path: $monitoringModulePath"
+        if (-not (Test-Path $monitoringModulePath)) {
+            Copy-Item (Join-Path $env:BASE_PATH "Monitoring.psm1") $monitoringModulePath -Force
+            Write-Success "  [Created] Monitoring.psm1 module"
+        }
+
+        # Check if loki_wal directory exists and create it if missing
+        Write-Info "Ensuring loki_wal directory exists and has correct permissions..."
+        if (-not (Test-Path -Path "$script:CONFIG_PATH\loki_wal")) {
+            New-Item -ItemType Directory -Path "$script:CONFIG_PATH\loki_wal" | Out-Null
+            Write-Success "  [Created] loki_wal directory"
+        }
+
+        # Set Docker permissions for loki_wal
+        Set-VolumePermissions -VolumePath "$script:CONFIG_PATH\loki_wal"
+        Write-Info "Permissions set for loki_wal directory"
+
+        # Ensure host volume path for Tempo data is created with permissions
+        Write-Host "Ensuring host volume path for Tempo data..." -ForegroundColor Cyan
+        $hostVolumePath = Join-Path -Path $script:CONFIG_PATH -ChildPath "tempo_data"
+        Ensure-HostVolumePath -Path $hostVolumePath
+
+        # Add monitoring initialization
+        Write-Info "Initializing monitoring components..."
+        Import-Module $monitoringModulePath -Force
+        Initialize-Monitoring -ConfigPath $script:CONFIG_PATH
+
+        # Manually create paths for Docker permissions
+        Write-Info "Setting Docker permissions for data directories..."
+        $dockerPaths = @(
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "postgres_data"
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "grafana_data"
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "prometheus_data"
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "loki_data"
+            Join-Path -Path $script:CONFIG_PATH -ChildPath "tempo_data"
+        )
+        Ensure-DockerPermissions -Paths $dockerPaths
+
+        Write-Info "`nCreating required directories:"
+        foreach ($path in $script:REQUIRED_PATHS) {
+            # Replace any incorrect path references
+            $correctedPath = $path -replace "scripts\\Configurations", "Configurations"
+            Write-Info "Processing path: $correctedPath"
+
+            if (-not (Test-Path -Path $correctedPath) -or $Force) {
+                New-Item -ItemType Directory -Path $correctedPath -Force | Out-Null
+                Write-Success "  [Created] $($correctedPath.Split('\')[-1])"
+            } else {
+                Write-Info "  [Exists] $($correctedPath.Split('\')[-1])"
+            }
+
+            # Set permissions on specific data paths
+            if ($correctedPath -like "*tempo_data*" -or $correctedPath -like "*prometheus_data*" -or $correctedPath -like "*loki_data*") {
+                Set-VolumePermissions -VolumePath $correctedPath
+            }
+        }
+
+        Write-Info "`nSetting up configuration files:"
+        #$script:CONFIG_PATH = Join-Path $script:PROJECT_ROOT "InsightOps\Configurations"
+
+        # Define configuration files with paths and ensure they're joined correctly
+        $configs = @(
+            @{Key = "tempo/tempo.yaml"; Value = Get-TempoConfig}
+            @{Key = "loki/loki-config.yaml"; Value = Get-LokiConfig}
+            @{Key = "prometheus/prometheus.yml"; Value = Get-PrometheusConfig}
+            #@{Key = "docker-compose.infrastructure.yml"; Value = Get-DockerComposeConfig -Type Infrastructure}
+            #@{Key = "docker-compose.application.yml"; Value = Get-DockerComposeConfig -Type Application}
+            @{Key = "docker-compose.yml"; Value = Get-DockerComposeConfig}
+        )
+
+        foreach ($config in $configs) {
+            # Use single Join-Path call for each file path
+            $filePath = Join-Path -Path $script:CONFIG_PATH -ChildPath $config.Key
+            Write-Info "Setting up config file: $filePath"
+
+            if (-not (Test-Path -Path $filePath) -or $Force) {
+                $directory = Split-Path -Path $filePath -Parent
+                Initialize-Directory -Path $directory
+
+                # Write with UTF8 encoding without BOM
+                $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
+                [System.IO.File]::WriteAllText($filePath, $config.Value, $utf8NoBomEncoding)
+
+                Write-Success "  [Created] $($config.Key)"
+            } else {
+                Write-Info "  [Exists] $($config.Key)"
+            }
+        }
+
+        try {
+            Write-Host "Updating prometheus config with windows exporter settings..." -ForegroundColor Yellow
+            $exporterPort = 9182
+            Write-Host "Exporter port: $exporterPort"
+
+            # Set the system IP and exporter port
+            $systemIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.PrefixOrigin -eq 'Dhcp' -or $_.PrefixOrigin -eq 'Manual' }).IPAddress | Select-Object -First 1
+            Write-Host "System IP address: $systemIp"
+
+            $exporterUrl = "http://${systemIp}:${exporterPort}/metrics"
+            Write-Host "Exporter URL: $exporterUrl"
+
+            $prometheusUrlCheck = "http://${systemIp}:9090/metrics"
+            Write-Host "Prometheus URL check: $prometheusUrlCheck"
+
+            # Update the Prometheus configuration file
+            Update-PrometheusConfigFile -systemIp $systemIp -exporterPort $exporterPort
+            Write-Host "Prometheus configuration file updated successfully."
+        } catch {
+            Write-Host "An error occurred: $($Error[0].Message)"
+            Write-Host "Error details: $($Error[0].Exception.ToString())"
+        }
+
+        Write-Info "Setting environment configuration..."
+        if (Set-EnvironmentConfig -Environment $Environment -Force:$Force) {
+            Write-Success "  [OK] Created .env.$Environment"
+        }
+
+        Write-Info "`nInitializing Grafana configurations..."
+
+        # Create Grafana directory structure
+        $grafanaPath = Join-Path $script:CONFIG_PATH "grafana"
+        $grafanaDirs = @(
+            "$grafanaPath\provisioning\dashboards"
+            "$grafanaPath\provisioning\datasources"
+            "$grafanaPath\dashboards"
+        )
+
+        # Create directories if they don't exist
+        foreach ($dir in $grafanaDirs) {
+            if (-not (Test-Path $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+                Write-Success "  [Created] Grafana directory: $($dir.Split('\')[-1])"
+            } else {
+                Write-Info "  [Exists] Grafana directory: $($dir.Split('\')[-1])"
+            }
+        }
 
         # Clean and create directories
         $grafanaPath = Join-Path $script:CONFIG_PATH "grafana"

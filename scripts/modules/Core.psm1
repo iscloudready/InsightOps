@@ -1,11 +1,13 @@
 # Core.psm1
 # Purpose: Core configuration and utility functions for InsightOps
-
 $ErrorActionPreference = "Stop"
 
 # Base paths - corrected path resolution
-$script:PROJECT_ROOT = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$script:CONFIG_PATH = Join-Path -Path $script:PROJECT_ROOT -ChildPath "Configurations"
+#$script:PROJECT_ROOT = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+#$script:CONFIG_PATH = Join-Path -Path $script:PROJECT_ROOT -ChildPath "Configurations"
+# Base paths - use environment variables set by main.ps1
+$script:PROJECT_ROOT = $env:PROJECT_ROOT
+$script:CONFIG_PATH = $env:CONFIG_PATH
 
 # Output path information for debugging
 Write-Verbose "PSScriptRoot: $PSScriptRoot"
@@ -15,6 +17,15 @@ Write-Verbose "Config Path: $script:CONFIG_PATH"
 # Environment Settings
 $script:NAMESPACE = "insightops"
 $script:DEFAULT_ENVIRONMENT = "Development"
+
+# Verify environment variables
+if (-not $script:PROJECT_ROOT) {
+    throw "PROJECT_ROOT environment variable not set"
+}
+
+if (-not $script:CONFIG_PATH) {
+    throw "CONFIG_PATH environment variable not set"
+}
 
 # Required paths - with explicit path joining
 $script:REQUIRED_PATHS = @(

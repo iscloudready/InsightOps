@@ -69,6 +69,51 @@ function Test-DockerEnvironment {
     }
 }
 
+function Verify-ProjectPaths {
+    [CmdletBinding()]
+    param()
+    
+    $projectRoot = $env:PROJECT_ROOT
+    if (-not $projectRoot) {
+        throw "PROJECT_ROOT environment variable not set"
+    }
+
+    Write-Host "Verifying project structure in: $projectRoot" -ForegroundColor Cyan
+
+    $requiredPaths = @{
+        "FrontendService" = @("Dockerfile", "FrontendService.csproj")
+        "ApiGateway" = @("Dockerfile", "ApiGateway.csproj")
+        "OrderService" = @("Dockerfile", "OrderService.csproj")
+        "InventoryService" = @("Dockerfile", "InventoryService.csproj")
+        "InsightOps.Observability" = @("Observability.csproj")
+        "Configurations" = @("docker-compose.yml")
+    }
+
+    $allValid = $true
+    foreach ($dir in $requiredPaths.Keys) {
+        $path = Join-Path $projectRoot $dir
+        Write-Host "`nChecking $dir..." -ForegroundColor Yellow
+        
+        if (-not (Test-Path $path -PathType Container)) {
+            Write-Host "✗ Directory not found: $path" -ForegroundColor Red
+            $allValid = $false
+            continue
+        }
+
+        foreach ($file in $requiredPaths[$dir]) {
+            $filePath = Join-Path $path $file
+            if (Test-Path $filePath -PathType Leaf) {
+                Write-Host "  ✓ Found: $file" -ForegroundColor Green
+            } else {
+                Write-Host "  ✗ Missing: $file" -ForegroundColor Red
+                $allValid = $false
+            }
+        }
+    }
+
+    return $allValid
+}
+
 function Reset-DockerEnvironment {
     [CmdletBinding()]
     param()
@@ -1295,6 +1340,49 @@ function Test-DatabaseConnection {
     }
 }
 
+function Verify-DockerComposeFiles {
+    [CmdletBinding()]
+    param()
+    
+    try {
+        $infraConfig = Join-Path $env:CONFIG_PATH "docker-compose.infrastructure.yml"
+        $appConfig = Join-Path $env:CONFIG_PATH "docker-compose.application.yml"
+
+        Write-Host "Verifying Docker Compose configurations..." -ForegroundColor Yellow
+        
+        if (-not (Test-Path $infraConfig)) {
+            Write-Host "Infrastructure compose file missing: $infraConfig" -ForegroundColor Red
+            return $false
+        }
+
+        if (-not (Test-Path $appConfig)) {
+            Write-Host "Application compose file missing: $appConfig" -ForegroundColor Red
+            return $false
+        }
+
+        # Validate infrastructure compose
+        $result = docker-compose -f $infraConfig config
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Infrastructure compose validation failed: $result" -ForegroundColor Red
+            return $false
+        }
+
+        # Validate application compose
+        $result = docker-compose -f $appConfig config
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Application compose validation failed: $result" -ForegroundColor Red
+            return $false
+        }
+
+        Write-Host "Docker Compose configurations validated successfully" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Error "Failed to verify Docker Compose files: $_"
+        return $false
+    }
+}
+
 function Rebuild-DockerService {
     [CmdletBinding()]
     param (
@@ -1302,6 +1390,252 @@ function Rebuild-DockerService {
     )
 
     try {
+        # Set up logging files
+        $outputFile = Join-Path $env:CONFIG_PATH "docker_rebuild.log"
+        $dockerBuildLog = Join-Path $env:CONFIG_PATH "docker_build.log"
+        $buildLogPath = Join-Path $env:CONFIG_PATH "docker_build_details.log"
+        $frontendBuildLog = Join-Path $env:CONFIG_PATH "frontend_build.log"
+        
+        Write-Host "Logging output to: $outputFile" -ForegroundColor Cyan
+        Write-Host "Docker build logs will be saved to: $dockerBuildLog" -ForegroundColor Cyan
+        Write-Host "Detailed build logs will be saved to: $buildLogPath" -ForegroundColor Cyan
+        Write-Host "Frontend build logs will be saved to: $frontendBuildLog" -ForegroundColor Cyan
+        
+        Start-Transcript -Path $outputFile -Append
+
+        if (-not (Verify-ProjectPaths)) {
+            throw "Project structure verification failed"
+        }
+
+        Write-Host "`nWorking directory: $(Get-Location)" -ForegroundColor Yellow | Tee-Object -Append -FilePath $outputFile
+        Write-Host "Project root: $env:PROJECT_ROOT" -ForegroundColor Yellow | Tee-Object -Append -FilePath $outputFile
+        Write-Host "Config path: $env:CONFIG_PATH" -ForegroundColor Yellow | Tee-Object -Append -FilePath $outputFile
+
+        Write-Host "Verifying Docker Compose file..." -ForegroundColor Yellow | Tee-Object -Append -FilePath $outputFile
+
+        if (-not $SkipDatabaseReset) {
+            Write-Host "`nPreparing database reset..." -ForegroundColor Yellow | Tee-Object -Append -FilePath $outputFile
+            $dbStatus = Show-DatabaseStatus
+            
+            if (-not $ServiceName -or $ServiceName -in @('orderservice', 'inventoryservice')) {
+                $resetConfirm = Read-Host "`nWould you like to reset the database? (y/n)"
+                if ($resetConfirm -eq 'y') {
+                    if (-not (Reset-Database)) {
+                        throw "Database reset failed"
+                    }
+                    Write-Host "✓ Database reset completed" -ForegroundColor Green | Tee-Object -Append -FilePath $outputFile
+                } else {
+                    Write-Host "Skipping database reset" -ForegroundColor Yellow | Tee-Object -Append -FilePath $outputFile
+                }
+            }
+        }
+
+        if (-not $script:DOCKER_COMPOSE_PATH) {
+            $script:DOCKER_COMPOSE_PATH = Join-Path $env:CONFIG_PATH "docker-compose.yml"
+            if (-not (Test-Path $script:DOCKER_COMPOSE_PATH)) {
+                Write-Error "Docker Compose configuration not found at: $script:DOCKER_COMPOSE_PATH" | Tee-Object -Append -FilePath $outputFile
+                throw "Docker Compose configuration not found"
+            } else {
+                Write-Host "Docker Compose file found: $script:DOCKER_COMPOSE_PATH" -ForegroundColor Green | Tee-Object -Append -FilePath $outputFile
+            }
+        }
+
+        $tempScriptPath = Join-Path $env:TEMP "docker-compose-commands.cmd"
+        Write-Host "Creating Docker commands..." -ForegroundColor Yellow | Tee-Object -Append -FilePath $dockerBuildLog
+        
+        # Build commands with debug logging
+        $commands = "@echo off`n"
+        $commands += "REM Validate configuration`n"
+        $commands += "docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" config`n"
+        $commands += "REM Stop existing containers`n"
+
+        if ($ServiceName) {
+            $commands += "docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" stop $ServiceName`n"
+        } else {
+            $commands += "docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" down --volumes --remove-orphans`n"
+        }
+
+        $commands += "REM Build and start services with debug logging`n"
+        if ($ServiceName) {
+            if ($ServiceName -eq "frontend") {
+                $commands += @"
+docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" build frontend 2>&1 | Tee-Object -Append -FilePath $frontendBuildLog
+docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" up -d frontend
+"@
+            } else {
+                $commands += @"
+docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" build $ServiceName
+docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" up -d $ServiceName
+"@
+            }
+        } else {
+            $commands += @"
+docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" build
+docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" up -d
+"@
+        }
+
+        $commands | Set-Content -Path $tempScriptPath -Force
+        Write-Host "Created temporary command file: $tempScriptPath" -ForegroundColor Gray | Tee-Object -Append -FilePath $dockerBuildLog
+
+        Write-Host "Setting up environment variables..." -ForegroundColor Yellow | Tee-Object -Append -FilePath $outputFile
+        $env:NAMESPACE = if ([string]::IsNullOrEmpty($env:NAMESPACE)) { "insightops" } else { $env:NAMESPACE }
+        Write-Host "Namespace set to: $env:NAMESPACE" -ForegroundColor Cyan | Tee-Object -Append -FilePath $outputFile
+
+        Write-Host "Setting up Docker volumes..." -ForegroundColor Cyan | Tee-Object -Append -FilePath $outputFile
+        
+        # Setup Docker volumes with error handling
+        $setupVolumesSuccess = $false
+        try {
+            Setup-DockerVolumes
+            Write-Host "✓ Docker volumes configured" -ForegroundColor Green | Tee-Object -Append -FilePath $outputFile
+            $setupVolumesSuccess = $true
+        } catch {
+            Write-Error "Failed to setup Docker volumes: $_" | Tee-Object -Append -FilePath $outputFile
+            $_ | Format-List -Force | Out-File -FilePath $outputFile -Append
+            throw
+        }
+
+        if (-not $setupVolumesSuccess) {
+            throw "Docker volume setup failed"
+        }
+
+        Write-Host "`nExecuting Docker commands..." -ForegroundColor Cyan | Tee-Object -Append -FilePath $dockerBuildLog
+        $output = & $tempScriptPath *>> $dockerBuildLog 2>&1
+            
+        if ($LASTEXITCODE -ne 0) {
+            # Handle frontend specific failures
+            if ($ServiceName -eq "frontend" -or -not $ServiceName) {
+                $failedContainer = docker ps -a --filter "status=exited" --filter "name=frontend" --format "{{.ID}}" | Select-Object -First 1
+                if ($failedContainer) {
+                    Write-Warning "Frontend build failed. Getting container logs..." | Tee-Object -Append -FilePath $frontendBuildLog
+                    docker logs $failedContainer 2>&1 | Tee-Object -Append -FilePath $frontendBuildLog
+                    
+                    Write-Host "Getting detailed build logs..." | Tee-Object -Append -FilePath $frontendBuildLog
+                    docker-compose --log-level DEBUG -f $script:DOCKER_COMPOSE_PATH logs frontend 2>&1 | Tee-Object -Append -FilePath $frontendBuildLog
+                    
+                    $dotnetBuildLogs = docker exec $failedContainer cat /tmp/dotnet-build.log 2>$null
+                    if ($dotnetBuildLogs) {
+                        Write-Host "Found dotnet build logs:" | Tee-Object -Append -FilePath $frontendBuildLog
+                        $dotnetBuildLogs | Tee-Object -Append -FilePath $frontendBuildLog
+                    }
+                }
+            }
+
+            # General error handling
+            $criticalError = $output | Where-Object { 
+                $_ -match "error|fail|exception" -and 
+                $_ -notmatch "name: insightops" -and 
+                $_ -notmatch "services:" -and
+                $_ -notmatch "context:" -and
+                $_ -notmatch "dockerfile:" -and
+                $_ -notmatch "http2: server: error reading preface" -and
+                $_ -notmatch "Error\(s\): 0" -and
+                $_ -notmatch "file has already been closed" -and
+                $_ -notmatch "warning CS\d+:" -and
+                $_ -notmatch "\.cs\(\d+,\d+\):" -and
+                $_ -notmatch "^#\d+\s+\d+\.\d+"
+            } | Select-Object -First 3
+
+            if ($criticalError) {
+                Write-Host "`nError Details:" -ForegroundColor Red | Tee-Object -Append -FilePath $dockerBuildLog
+                $criticalError | ForEach-Object { Write-Host "- $_" -ForegroundColor Red | Tee-Object -Append -FilePath $dockerBuildLog }
+
+                # Get failed container logs for any service
+                $failedContainer = docker ps -a --filter "status=exited" --format "{{.ID}}" | Select-Object -First 1
+                if ($failedContainer) {
+                    $containerLogPath = Join-Path $env:CONFIG_PATH "failed_container.log"
+                    Write-Host "Saving failed container logs to: $containerLogPath" -ForegroundColor Yellow | Tee-Object -Append -FilePath $dockerBuildLog
+                    docker logs $failedContainer > $containerLogPath
+
+                    # Get build logs if available
+                    $buildLogs = docker exec $failedContainer cat /tmp/build.log 2>$null
+                    if ($buildLogs) {
+                        Write-Host "Found build logs:" | Tee-Object -Append -FilePath $buildLogPath
+                        $buildLogs | Tee-Object -Append -FilePath $buildLogPath
+                    }
+                }
+                throw "Docker commands failed with critical errors"
+            }
+        }
+
+        $dockerComposeFile = Join-Path $env:CONFIG_PATH "docker-compose.yml"
+        $runningServices = docker-compose -f $dockerComposeFile ps --services --filter "status=running"
+
+        Write-Host "Running services:" -ForegroundColor Cyan | Tee-Object -Append -FilePath $outputFile
+        $runningServices | ForEach-Object { Write-Host "- $_" -ForegroundColor Green | Tee-Object -Append -FilePath $outputFile }
+
+        if (-not $runningServices) {
+            throw "No services are running after deployment"
+        }
+
+        Write-Host "Waiting for services to initialize..." -ForegroundColor Cyan | Tee-Object -Append -FilePath $outputFile
+        Start-Sleep -Seconds 30
+
+        Write-Host "Checking service health..." -ForegroundColor Cyan | Tee-Object -Append -FilePath $outputFile
+        $services = if ($ServiceName) { @($ServiceName) } else { @("frontend", "apigateway", "orderservice", "inventoryservice") }
+
+        foreach ($svc in $services) {
+            $containerName = "${env:NAMESPACE}_$svc"
+            try {
+                $status = & docker inspect --format='{{.State.Health.Status}}' $containerName 2>$null
+                if ($status) {
+                    Write-Host "`nService: $svc" -ForegroundColor Cyan | Tee-Object -Append -FilePath $outputFile
+                    Write-Host "Status: $status" -ForegroundColor $(if ($status -eq 'healthy') { 'Green' } else { 'Yellow' }) | Tee-Object -Append -FilePath $outputFile
+                } else {
+                    Write-Warning "Service $svc is not running or does not exist." | Tee-Object -Append -FilePath $outputFile
+                }
+
+                # Save logs for each service
+                $logDir = ".\docker_logs"
+                if (-not (Test-Path $logDir)) {
+                    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+                }
+
+                if (docker ps -a --filter name=$containerName 2>$null) {
+                    Write-Host "Retrieving logs for $containerName..." -ForegroundColor Yellow | Tee-Object -Append -FilePath $outputFile
+                    $logFilePath = Join-Path $logDir "$containerName.log"
+                    docker logs $containerName > $logFilePath 2>&1
+                    Write-Host " Logs saved to: $logFilePath" -ForegroundColor Green | Tee-Object -Append -FilePath $outputFile
+                }
+            } catch {
+                Write-Error "Failed to check service $svc : $_" | Tee-Object -Append -FilePath $outputFile
+            }
+        }
+
+        Write-Host "`n✓ Service rebuild completed successfully" -ForegroundColor Green | Tee-Object -Append -FilePath $outputFile
+        return $true
+    }
+    catch {
+        Write-Error "Failed to rebuild services: $_" | Tee-Object -Append -FilePath $outputFile
+        $_ | Format-List -Force | Out-File -FilePath $outputFile -Append
+        return $false
+    }
+    finally {
+        if ($tempScriptPath -and (Test-Path $tempScriptPath)) {
+            Remove-Item $tempScriptPath -Force
+        }
+        Remove-Item Env:\NAMESPACE -ErrorAction SilentlyContinue
+        Stop-Transcript
+    }
+}
+
+function RRRebuild-DockerService {
+    [CmdletBinding()]
+    param (
+        [string]$ServiceName = $null
+    )
+
+    try {
+        # Verify paths first
+        if (-not (Verify-ProjectPaths)) {
+            throw "Project structure verification failed"
+        }
+
+        Write-Host "`nWorking directory: $(Get-Location)" -ForegroundColor Yellow
+        Write-Host "Project root: $env:PROJECT_ROOT" -ForegroundColor Yellow
+        Write-Host "Config path: $env:CONFIG_PATH" -ForegroundColor Yellow
+
         # Verify Docker Compose file
         Write-Host "Verifying Docker Compose file..." -ForegroundColor Yellow
 
@@ -1405,7 +1739,7 @@ docker compose --file `"$script:DOCKER_COMPOSE_PATH`" up -d
             $_ | Format-List -Force
         }
 
-# Execute Docker commands
+        # Execute Docker commands
         Write-Host "`nExecuting Docker commands..." -ForegroundColor Cyan
         try {
             # Redirect verbose output to null and only capture errors

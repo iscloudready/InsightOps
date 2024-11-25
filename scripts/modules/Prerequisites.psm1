@@ -1,4 +1,4 @@
-function Test-PortAvailability {
+﻿function Test-PortAvailability {
     param (
         [int]$Port,
         [string]$Service
@@ -17,6 +17,62 @@ function Test-PortAvailability {
     catch {
         return $true  # Connection failed means port is available
     }
+}
+
+function Verify-ProjectEnvironment {
+    [CmdletBinding()]
+    param(
+        [string]$ProjectRoot = $env:PROJECT_ROOT
+    )
+
+    Write-Host "Project structure:" -ForegroundColor Cyan
+    Write-Host "==================" -ForegroundColor Cyan
+    Write-Host "Project Root: $ProjectRoot"
+    Write-Host "Configuration Path: $(Join-Path $ProjectRoot 'Configurations')"
+
+    Write-Host "`nVerifying paths..." -ForegroundColor Yellow
+    $requiredPaths = @(
+        "FrontendService",
+        "ApiGateway",
+        "OrderService",
+        "InventoryService",
+        "InsightOps.Observability",
+        "Configurations",
+        "scripts"
+    )
+
+    $allValid = $true
+    foreach ($path in $requiredPaths) {
+        $fullPath = Join-Path $ProjectRoot $path
+        if (Test-Path $fullPath) {
+            Write-Host "✓ Found: $path" -ForegroundColor Green
+            
+            # Check for required files in service directories
+            if ($path -match "(FrontendService|ApiGateway|OrderService|InventoryService)") {
+                $dockerfilePath = Join-Path $fullPath "Dockerfile"
+                $csprojPath = Join-Path $fullPath "$path.csproj"
+                
+                if (Test-Path $dockerfilePath) {
+                    Write-Host "  ✓ Found Dockerfile" -ForegroundColor Green
+                } else {
+                    Write-Host "  ✗ Missing Dockerfile" -ForegroundColor Red
+                    $allValid = $false
+                }
+                
+                if (Test-Path $csprojPath) {
+                    Write-Host "  ✓ Found $path.csproj" -ForegroundColor Green
+                } else {
+                    Write-Host "  ✗ Missing $path.csproj" -ForegroundColor Red
+                    $allValid = $false
+                }
+            }
+        } else {
+            Write-Host "✗ Missing: $path" -ForegroundColor Red
+            $allValid = $false
+        }
+    }
+
+    return $allValid
 }
 
 function Test-AllPrerequisites {
@@ -159,6 +215,14 @@ function Test-Prerequisites {
     param()
     
     try {
+        Write-Host "`nPerforming prerequisite checks..." -ForegroundColor Cyan
+
+        # First verify project environment
+        if (-not (Verify-ProjectEnvironment)) {
+            Write-Host "Project environment verification failed" -ForegroundColor Red
+            return $false
+        }
+
         # Check Docker is running
         $dockerInfo = docker info 2>&1
         # Filter out any warnings that contain 'blkio'
@@ -179,6 +243,7 @@ function Test-Prerequisites {
         }
 
         # All checks passed
+        Write-Host "✓ All prerequisites met" -ForegroundColor Green
         return $true
     }
     catch {
@@ -189,5 +254,6 @@ function Test-Prerequisites {
 
 Export-ModuleMember -Function @(
     'Test-AllPrerequisites',
-    'Test-Prerequisites'
+    'Test-Prerequisites',
+    'Verify-ProjectEnvironment'
 )
