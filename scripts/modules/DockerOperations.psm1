@@ -1383,6 +1383,42 @@ function Verify-DockerComposeFiles {
     }
 }
 
+function Capture-FrontendBuildLogs {
+    param (
+        [string]$ContainerId,
+        [string]$LogPath
+    )
+
+    "[$(Get-Date)] Capturing frontend build logs..." | Add-Content -Path $LogPath
+    
+    # Get restore logs
+    "[$(Get-Date)] Restore Logs:" | Add-Content -Path $LogPath
+    docker exec $ContainerId cat /tmp/restore.log 2>$null | Add-Content -Path $LogPath
+    
+    # Get build logs
+    "[$(Get-Date)] Build Logs:" | Add-Content -Path $LogPath
+    docker exec $ContainerId cat /tmp/build.log 2>$null | Add-Content -Path $LogPath
+    
+    # Get publish logs
+    "[$(Get-Date)] Publish Logs:" | Add-Content -Path $LogPath
+    docker exec $ContainerId cat /tmp/publish.log 2>$null | Add-Content -Path $LogPath
+    
+    # Get Dockerfile content
+    $dockerfilePath = Join-Path $env:PROJECT_ROOT "FrontendService/Dockerfile"
+    if (Test-Path $dockerfilePath) {
+        "[$(Get-Date)] Dockerfile Content:" | Add-Content -Path $LogPath
+        Get-Content $dockerfilePath | Add-Content -Path $LogPath
+    }
+    
+    # Add container details
+    "[$(Get-Date)] Container Details:" | Add-Content -Path $LogPath
+    docker inspect $ContainerId 2>$null | Add-Content -Path $LogPath
+
+    # Get container logs
+    "[$(Get-Date)] Container Logs:" | Add-Content -Path $LogPath
+    docker logs $ContainerId 2>&1 | Add-Content -Path $LogPath
+}
+
 function Rebuild-DockerService {
     [CmdletBinding()]
     param (
@@ -1456,41 +1492,57 @@ function Rebuild-DockerService {
         }
 
         $commands += "REM Build and start services with debug logging`n"
-        if ($ServiceName) {
-if ($ServiceName -eq "frontend") {
-    $commands += @"
-echo Starting frontend build at %DATE% %TIME% > `"$frontendBuildLog`"
-echo Building frontend service... >> `"$frontendBuildLog`"
-docker compose -f `"$script:DOCKER_COMPOSE_PATH`" build frontend --progress=plain >> `"$frontendBuildLog`" 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo Frontend build failed at %DATE% %TIME% >> `"$frontendBuildLog`"
+if ($ServiceName) {
+    if ($ServiceName -eq "frontend") {
+        # Initialize the frontend build log
+        "Starting frontend build at $(Get-Date)" | Out-File -FilePath $frontendBuildLog -Force
+        
+        $commands += @"
+echo [$(Get-Date)] Starting frontend service build >> `"$frontendBuildLog`"
+docker compose -f `"$script:DOCKER_COMPOSE_PATH`" build frontend --no-cache --progress=plain >> `"$frontendBuildLog`" 2>&1
+if errorlevel 1 (
+    echo [$(Get-Date)] Frontend build failed >> `"$frontendBuildLog`"
     docker compose -f `"$script:DOCKER_COMPOSE_PATH`" logs frontend >> `"$frontendBuildLog`" 2>&1
     for /f "tokens=*" %%i in ('docker ps -a --filter "name=frontend" --format "{{.ID}}"') do (
-        echo Container logs for %%i: >> `"$frontendBuildLog`"
+        echo [$(Get-Date)] Container logs for %%i >> `"$frontendBuildLog`"
         docker logs %%i >> `"$frontendBuildLog`" 2>&1
-        echo Container details for %%i: >> `"$frontendBuildLog`"
+        echo [$(Get-Date)] Container inspect for %%i >> `"$frontendBuildLog`"
         docker inspect %%i >> `"$frontendBuildLog`" 2>&1
     )
     exit /b 1
 )
-echo Frontend build succeeded at %DATE% %TIME% >> `"$frontendBuildLog`"
+echo [$(Get-Date)] Frontend build successful >> `"$frontendBuildLog`"
+echo [$(Get-Date)] Starting frontend container >> `"$frontendBuildLog`"
 docker compose -f `"$script:DOCKER_COMPOSE_PATH`" up -d frontend >> `"$frontendBuildLog`" 2>&1
 "@
+    } else {
+        $commands += @"
+docker compose -f `"$script:DOCKER_COMPOSE_PATH`" build $ServiceName --no-cache --progress=plain
+docker compose -f `"$script:DOCKER_COMPOSE_PATH`" up -d $ServiceName
+"@
+    }
 } else {
-                $commands += @"
-docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" build $ServiceName
-docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" up -d $ServiceName
+    $commands += @"
+docker compose -f `"$script:DOCKER_COMPOSE_PATH`" build --no-cache --progress=plain
+docker compose -f `"$script:DOCKER_COMPOSE_PATH`" up -d
 "@
-            }
-        } else {
-            $commands += @"
-docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" build
-docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" up -d
-"@
-        }
+}
 
         $commands | Set-Content -Path $tempScriptPath -Force
         Write-Host "Created temporary command file: $tempScriptPath" -ForegroundColor Gray | Tee-Object -Append -FilePath $dockerBuildLog
+
+        if ($ServiceName -eq "frontend" -or -not $ServiceName) {
+            Write-Host "Initializing frontend build log at: $frontendBuildLog" -ForegroundColor Cyan
+            "[$(Get-Date)] Build session started" | Out-File -FilePath $frontendBuildLog -Force
+            
+            # Add Dockerfile content to log for reference
+            $dockerfilePath = Join-Path $env:PROJECT_ROOT "FrontendService/Dockerfile"
+            if (Test-Path $dockerfilePath) {
+                "`n[$(Get-Date)] Dockerfile content:" | Add-Content -Path $frontendBuildLog
+                Get-Content $dockerfilePath | Add-Content -Path $frontendBuildLog
+            }
+        }
+
 
         Write-Host "Setting up environment variables..." -ForegroundColor Yellow | Tee-Object -Append -FilePath $outputFile
         $env:NAMESPACE = if ([string]::IsNullOrEmpty($env:NAMESPACE)) { "insightops" } else { $env:NAMESPACE }
