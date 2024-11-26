@@ -1457,12 +1457,26 @@ function Rebuild-DockerService {
 
         $commands += "REM Build and start services with debug logging`n"
         if ($ServiceName) {
-            if ($ServiceName -eq "frontend") {
-                $commands += @"
-docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" build frontend 2>&1 | Tee-Object -Append -FilePath $frontendBuildLog
-docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" up -d frontend
+if ($ServiceName -eq "frontend") {
+    $commands += @"
+echo Starting frontend build at %DATE% %TIME% > `"$frontendBuildLog`"
+echo Building frontend service... >> `"$frontendBuildLog`"
+docker compose -f `"$script:DOCKER_COMPOSE_PATH`" build frontend --progress=plain >> `"$frontendBuildLog`" 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo Frontend build failed at %DATE% %TIME% >> `"$frontendBuildLog`"
+    docker compose -f `"$script:DOCKER_COMPOSE_PATH`" logs frontend >> `"$frontendBuildLog`" 2>&1
+    for /f "tokens=*" %%i in ('docker ps -a --filter "name=frontend" --format "{{.ID}}"') do (
+        echo Container logs for %%i: >> `"$frontendBuildLog`"
+        docker logs %%i >> `"$frontendBuildLog`" 2>&1
+        echo Container details for %%i: >> `"$frontendBuildLog`"
+        docker inspect %%i >> `"$frontendBuildLog`" 2>&1
+    )
+    exit /b 1
+)
+echo Frontend build succeeded at %DATE% %TIME% >> `"$frontendBuildLog`"
+docker compose -f `"$script:DOCKER_COMPOSE_PATH`" up -d frontend >> `"$frontendBuildLog`" 2>&1
 "@
-            } else {
+} else {
                 $commands += @"
 docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" build $ServiceName
 docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" up -d $ServiceName
@@ -1504,23 +1518,6 @@ docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" up -d
         $output = & $tempScriptPath *>> $dockerBuildLog 2>&1
             
         if ($LASTEXITCODE -ne 0) {
-            # Handle frontend specific failures
-            if ($ServiceName -eq "frontend" -or -not $ServiceName) {
-                $failedContainer = docker ps -a --filter "status=exited" --filter "name=frontend" --format "{{.ID}}" | Select-Object -First 1
-                if ($failedContainer) {
-                    Write-Warning "Frontend build failed. Getting container logs..." | Tee-Object -Append -FilePath $frontendBuildLog
-                    docker logs $failedContainer 2>&1 | Tee-Object -Append -FilePath $frontendBuildLog
-                    
-                    Write-Host "Getting detailed build logs..." | Tee-Object -Append -FilePath $frontendBuildLog
-                    docker-compose --log-level DEBUG -f $script:DOCKER_COMPOSE_PATH logs frontend 2>&1 | Tee-Object -Append -FilePath $frontendBuildLog
-                    
-                    $dotnetBuildLogs = docker exec $failedContainer cat /tmp/dotnet-build.log 2>$null
-                    if ($dotnetBuildLogs) {
-                        Write-Host "Found dotnet build logs:" | Tee-Object -Append -FilePath $frontendBuildLog
-                        $dotnetBuildLogs | Tee-Object -Append -FilePath $frontendBuildLog
-                    }
-                }
-            }
 
             # General error handling
             $criticalError = $output | Where-Object { 
@@ -1609,6 +1606,29 @@ docker compose --log-level DEBUG --file `"$script:DOCKER_COMPOSE_PATH`" up -d
     catch {
         Write-Error "Failed to rebuild services: $_" | Tee-Object -Append -FilePath $outputFile
         $_ | Format-List -Force | Out-File -FilePath $outputFile -Append
+
+        if ($LASTEXITCODE -ne 0) {
+            if (($ServiceName -eq "frontend" -or -not $ServiceName) -and (Test-Path $frontendBuildLog)) {
+                Write-Host "Frontend build logs:" -ForegroundColor Yellow | Tee-Object -Append -FilePath $outputFile
+                Get-Content $frontendBuildLog | Tee-Object -Append -FilePath $outputFile
+        
+                # Get Dockerfile content
+                $dockerfilePath = Join-Path $env:PROJECT_ROOT "FrontendService/Dockerfile"
+                if (Test-Path $dockerfilePath) {
+                    Write-Host "`nDockerfile content:" -ForegroundColor Yellow | Tee-Object -Append -FilePath $frontendBuildLog
+                    Get-Content $dockerfilePath | Tee-Object -Append -FilePath $frontendBuildLog
+                }
+
+                $dotnetBuildLogs = docker ps -a --filter "name=frontend" --format "{{.ID}}" | ForEach-Object {
+                    docker exec $_ cat /tmp/dotnet-build.log 2>$null
+                }
+                if ($dotnetBuildLogs) {
+                    Write-Host "`n.NET build logs:" -ForegroundColor Yellow | Tee-Object -Append -FilePath $frontendBuildLog
+                    $dotnetBuildLogs | Tee-Object -Append -FilePath $frontendBuildLog
+                }
+            }
+        }
+
         return $false
     }
     finally {
