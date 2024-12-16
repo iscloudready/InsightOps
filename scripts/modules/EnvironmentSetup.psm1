@@ -496,6 +496,23 @@ networks:
 '@
 }
 
+# Add this function to sanitize paths
+function Get-SafePath {
+    param (
+        [string]$Path
+    )
+    
+    # Normalize path separators
+    $normalizedPath = $Path -replace '\\', '/'
+    
+    # Quote path if it contains spaces
+    if ($normalizedPath -match '\s') {
+        $normalizedPath = "`"$normalizedPath`""
+    }
+    
+    return $normalizedPath
+}
+
 function Get-DockerComposeConfig {
     return @'
 version: '3'
@@ -617,8 +634,8 @@ services:
   # Application Microservices
   orderservice:
     build:
-      context: ../OrderService
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./OrderService/Dockerfile
     container_name: ${NAMESPACE:-insightops}_orderservice
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
@@ -640,8 +657,8 @@ services:
 
   inventoryservice:
     build:
-      context: ../InventoryService
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./InventoryService/Dockerfile
     container_name: ${NAMESPACE:-insightops}_inventoryservice
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
@@ -662,8 +679,8 @@ services:
 
   apigateway:
     build:
-      context: ../ApiGateway
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./ApiGateway/Dockerfile
     container_name: ${NAMESPACE:-insightops}_apigateway
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
@@ -684,8 +701,8 @@ services:
 
   frontend:
     build:
-      context: ../FrontendService
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./FrontendService/Dockerfile
     container_name: ${NAMESPACE:-insightops}_frontend
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker

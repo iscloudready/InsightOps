@@ -17,24 +17,14 @@ RUN apt-get update \
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-
-# Copy shared projects first
-COPY ["../InsightOps.Observability/Observability.csproj", "../InsightOps.Observability/"]
-COPY ["FrontendService.csproj", "./"]
-
-# Restore packages with detailed logging
-RUN dotnet restore "FrontendService.csproj" --verbosity detailed > /tmp/restore.log 2>&1 || (cat /tmp/restore.log && exit 1)
-
-# Copy remaining files
+COPY ["FrontendService.csproj", "."]
+RUN dotnet restore "FrontendService.csproj"
 COPY . .
-COPY ["../InsightOps.Observability/", "../InsightOps.Observability/"]
+RUN dotnet build "FrontendService.csproj" -c Release -o /app/build
 
-# Build with detailed logging
-RUN dotnet build "FrontendService.csproj" -c Release -o /app/build --verbosity detailed > /tmp/build.log 2>&1 || (cat /tmp/build.log && exit 1)
-
-# Publish stage
+# Publish
 FROM build AS publish
-RUN dotnet publish "FrontendService.csproj" -c Release -o /app/publish /p:UseAppHost=false --verbosity detailed > /tmp/publish.log 2>&1 || (cat /tmp/publish.log && exit 1)
+RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
 
 # Final stage
 FROM base AS final

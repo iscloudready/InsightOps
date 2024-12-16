@@ -1556,7 +1556,7 @@ docker compose -f `"$script:DOCKER_COMPOSE_PATH`" up -d
         }
 
         Write-Host "`nExecuting Docker commands..." -ForegroundColor Cyan | Tee-Object -Append -FilePath $dockerBuildLog
-        $output = & $tempScriptPath *>> $dockerBuildLog 2>&1
+        $output = & "$tempScriptPath" *>> $dockerBuildLog 2>&1
             
         if ($LASTEXITCODE -ne 0) {
             # Handle frontend specific failures
