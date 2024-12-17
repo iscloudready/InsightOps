@@ -29,6 +29,47 @@ namespace FrontendService.Services
         {
             try
             {
+                _logger.LogInformation("Starting GetAllItemsAsync request to API Gateway");
+
+                var response = await _httpClient.GetAsync("/api/gateway/inventory");
+                var content = await response.Content.ReadAsStringAsync(); // Defined here before use
+
+                _logger.LogInformation(
+                    "Inventory API Response - Status: {StatusCode}, Content: {Content}",
+                    response.StatusCode,
+                    content);
+
+                response.EnsureSuccessStatusCode();
+
+                var items = JsonSerializer.Deserialize<IEnumerable<InventoryItemDto>>(content,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                    ?? Enumerable.Empty<InventoryItemDto>();
+
+                _logger.LogInformation("Successfully retrieved {Count} inventory items", items.Count());
+                return items;
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "HTTP request error retrieving inventory. BaseAddress: {BaseAddress}",
+                    _httpClient.BaseAddress);
+                throw;
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "Failed to deserialize inventory response"); // Removed content reference
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error getting inventory items");
+                throw;
+            }
+        }
+
+        public async Task<IEnumerable<InventoryItemDto>> _GetAllItemsAsync()
+        {
+            try
+            {
                 _logger.LogInformation("Making request to: {BaseUrl}/api/gateway/inventory",
                     _httpClient.BaseAddress);
 
@@ -65,7 +106,7 @@ namespace FrontendService.Services
             }
         }
 
-        public async Task<IEnumerable<InventoryItemDto>> _GetAllItemsAsync()
+        public async Task<IEnumerable<InventoryItemDto>> __GetAllItemsAsync()
         {
             try
             {

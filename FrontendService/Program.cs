@@ -78,10 +78,10 @@ if (builder.Environment.IsDevelopment())
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
     serverOptions.ListenLocalhost(5010);
-    serverOptions.ListenLocalhost(44300, listenOptions =>
-    {
-        listenOptions.UseHttps();
-    });
+    //serverOptions.ListenLocalhost(44300, listenOptions =>
+    //{
+    //    listenOptions.UseHttps();
+    //});
 });
 
 // Configure Serilog first
@@ -201,6 +201,13 @@ if (app.Environment.IsDevelopment())
 }
 else
 {
+    // Set scheme to HTTP for Docker environment
+    app.Use(async (context, next) =>
+    {
+        context.Request.Scheme = "http";
+        await next();
+    });
+
     app.UseExceptionHandler("/Home/Error");
     app.UseHsts();
 }
