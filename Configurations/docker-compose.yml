@@ -59,7 +59,7 @@ services:
     image: prom/prometheus:latest
     container_name: ${NAMESPACE:-insightops}_prometheus
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ${CONFIG_PATH}/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     ports:
       - "${PROMETHEUS_PORT:-9091}:9090"
@@ -75,7 +75,7 @@ services:
     container_name: ${NAMESPACE:-insightops}_loki
     user: "root"
     volumes:
-      - ./loki/loki-config.yaml:/etc/loki/local-config.yaml
+      - ${CONFIG_PATH}/loki/loki-config.yaml:/etc/loki/local-config.yaml
       - loki_data:/loki
       - ${CONFIG_PATH}/loki_wal:/loki/wal
     ports:
@@ -98,7 +98,7 @@ services:
     environment:
       - TEMPO_LOG_LEVEL=debug
     volumes:
-      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - ${CONFIG_PATH}/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro 
       - tempo_data:/var/tempo
     ports:
       - "${TEMPO_PORT:-4317}:4317"
@@ -114,23 +114,36 @@ services:
     depends_on:
       - postgres
 
-  # Application Microservices
+# Application Microservices
   orderservice:
     build:
-      context: .
-      dockerfile: ./OrderService/Dockerfile
+      context: ${PROJECT_ROOT}
+      dockerfile: OrderService/Dockerfile
     container_name: ${NAMESPACE:-insightops}_orderservice
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_HTTP_PORTS=80
       - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+      - Observability__Docker__Infrastructure__LokiUrl=http://loki:3100
+      - Observability__Docker__Infrastructure__TempoEndpoint=http://tempo:4317
+      - Observability__Docker__Infrastructure__PrometheusEndpoint=http://prometheus:9090
     volumes:
-      - ${PROJECT_ROOT:-..}/OrderService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - type: bind
+        source: ${PROJECT_ROOT}/OrderService/appsettings.Docker.json
+        target: /app/appsettings.Docker.json
+        read_only: true
     ports:
       - "${ORDERSERVICE_PORT:-7265}:80"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s
@@ -140,19 +153,32 @@ services:
 
   inventoryservice:
     build:
-      context: .
-      dockerfile: ./InventoryService/Dockerfile
+      context: ${PROJECT_ROOT}
+      dockerfile: InventoryService/Dockerfile
     container_name: ${NAMESPACE:-insightops}_inventoryservice
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+      - Observability__Docker__Infrastructure__LokiUrl=http://loki:3100
+      - Observability__Docker__Infrastructure__TempoEndpoint=http://tempo:4317
+      - Observability__Docker__Infrastructure__PrometheusEndpoint=http://prometheus:9090
     volumes:
-      - ${PROJECT_ROOT:-..}/InventoryService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - type: bind
+        source: ${PROJECT_ROOT}/InventoryService/appsettings.Docker.json
+        target: /app/appsettings.Docker.json
+        read_only: true
     ports:
       - "${INVENTORYSERVICE_PORT:-7070}:80"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s
@@ -162,19 +188,28 @@ services:
 
   apigateway:
     build:
-      context: .
-      dockerfile: ./ApiGateway/Dockerfile
+      context: ${PROJECT_ROOT}
+      dockerfile: ApiGateway/Dockerfile
     container_name: ${NAMESPACE:-insightops}_apigateway
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
+      - Observability__Docker__Infrastructure__LokiUrl=http://loki:3100
+      - Observability__Docker__Infrastructure__TempoEndpoint=http://tempo:4317
+      - Observability__Docker__Infrastructure__PrometheusEndpoint=http://prometheus:9090
     volumes:
-      - ${PROJECT_ROOT:-..}/ApiGateway/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - type: bind
+        source: ${PROJECT_ROOT}/ApiGateway/appsettings.Docker.json
+        target: /app/appsettings.Docker.json
+        read_only: true
     ports:
       - "${APIGATEWAY_PORT:-7237}:80"
     depends_on:
       - orderservice
       - inventoryservice
+      - loki
+      - tempo
+      - prometheus
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s
@@ -184,21 +219,34 @@ services:
 
   frontend:
     build:
-      context: .
-      dockerfile: ./FrontendService/Dockerfile
+      context: ${PROJECT_ROOT}
+      dockerfile: FrontendService/Dockerfile
     container_name: ${NAMESPACE:-insightops}_frontend
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
       - DataProtection__Keys=/app/Keys
+      - Observability__Docker__Infrastructure__LokiUrl=http://loki:3100
+      - Observability__Docker__Infrastructure__TempoEndpoint=http://tempo:4317
+      - Observability__Docker__Infrastructure__PrometheusEndpoint=http://prometheus:9090
     user: "1001:1001"
     volumes:
-      - ${PROJECT_ROOT:-..}/FrontendService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
-      - keys_data:/app/Keys
+      - type: bind
+        source: ${PROJECT_ROOT}/FrontendService/appsettings.Docker.json
+        target: /app/appsettings.Docker.json
+        read_only: true
+      - type: volume
+        source: keys_data
+        target: /app/Keys
+        volume:
+          nocopy: true
     ports:
       - "${FRONTEND_PORT:-5010}:80"
     depends_on:
       - apigateway
+      - loki
+      - tempo
+      - prometheus
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s

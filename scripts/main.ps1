@@ -16,6 +16,18 @@ $env:BASE_PATH = $script:BASE_PATH
 $env:PROJECT_ROOT = $script:PROJECT_ROOT
 $env:MODULE_PATH = $script:MODULE_PATH
 $env:CONFIG_PATH = $script:CONFIG_PATH
+$env:NAMESPACE = "insightops"  # Add this line to set NAMESPACE
+
+# Add verification here
+Write-Host "Verifying environment variables..." -ForegroundColor Cyan
+$requiredVars = @('PROJECT_ROOT', 'CONFIG_PATH', 'NAMESPACE')
+foreach ($var in $requiredVars) {
+    $value = Get-Item "env:$var" -ErrorAction SilentlyContinue
+    if (-not $value) {
+        throw "Required environment variable $var is not set"
+    }
+    Write-Host "Variable $var : $($value.Value)" -ForegroundColor Green
+}
 
 # Verify paths
 Write-Host "Path Configuration:" -ForegroundColor Cyan

@@ -576,7 +576,7 @@ services:
     image: prom/prometheus:latest
     container_name: ${NAMESPACE:-insightops}_prometheus
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ${CONFIG_PATH}/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     ports:
       - "${PROMETHEUS_PORT:-9091}:9090"
@@ -592,7 +592,7 @@ services:
     container_name: ${NAMESPACE:-insightops}_loki
     user: "root"
     volumes:
-      - ./loki/loki-config.yaml:/etc/loki/local-config.yaml
+      - ${CONFIG_PATH}/loki/loki-config.yaml:/etc/loki/local-config.yaml
       - loki_data:/loki
       - ${CONFIG_PATH}/loki_wal:/loki/wal
     ports:
@@ -615,7 +615,7 @@ services:
     environment:
       - TEMPO_LOG_LEVEL=debug
     volumes:
-      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - ${CONFIG_PATH}/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro 
       - tempo_data:/var/tempo
     ports:
       - "${TEMPO_PORT:-4317}:4317"
@@ -631,23 +631,36 @@ services:
     depends_on:
       - postgres
 
-  # Application Microservices
+# Application Microservices
   orderservice:
     build:
-      context: .
-      dockerfile: ./OrderService/Dockerfile
+      context: ${PROJECT_ROOT}
+      dockerfile: OrderService/Dockerfile
     container_name: ${NAMESPACE:-insightops}_orderservice
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_HTTP_PORTS=80
       - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+      - Observability__Docker__Infrastructure__LokiUrl=http://loki:3100
+      - Observability__Docker__Infrastructure__TempoEndpoint=http://tempo:4317
+      - Observability__Docker__Infrastructure__PrometheusEndpoint=http://prometheus:9090
     volumes:
-      - ${PROJECT_ROOT:-..}/OrderService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - type: bind
+        source: ${PROJECT_ROOT}/OrderService/appsettings.Docker.json
+        target: /app/appsettings.Docker.json
+        read_only: true
     ports:
       - "${ORDERSERVICE_PORT:-7265}:80"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s
@@ -657,19 +670,32 @@ services:
 
   inventoryservice:
     build:
-      context: .
-      dockerfile: ./InventoryService/Dockerfile
+      context: ${PROJECT_ROOT}
+      dockerfile: InventoryService/Dockerfile
     container_name: ${NAMESPACE:-insightops}_inventoryservice
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=insightops_db;Username=insightops_user;Password=insightops_pwd
+      - Observability__Docker__Infrastructure__LokiUrl=http://loki:3100
+      - Observability__Docker__Infrastructure__TempoEndpoint=http://tempo:4317
+      - Observability__Docker__Infrastructure__PrometheusEndpoint=http://prometheus:9090
     volumes:
-      - ${PROJECT_ROOT:-..}/InventoryService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - type: bind
+        source: ${PROJECT_ROOT}/InventoryService/appsettings.Docker.json
+        target: /app/appsettings.Docker.json
+        read_only: true
     ports:
       - "${INVENTORYSERVICE_PORT:-7070}:80"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s
@@ -679,19 +705,28 @@ services:
 
   apigateway:
     build:
-      context: .
-      dockerfile: ./ApiGateway/Dockerfile
+      context: ${PROJECT_ROOT}
+      dockerfile: ApiGateway/Dockerfile
     container_name: ${NAMESPACE:-insightops}_apigateway
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
+      - Observability__Docker__Infrastructure__LokiUrl=http://loki:3100
+      - Observability__Docker__Infrastructure__TempoEndpoint=http://tempo:4317
+      - Observability__Docker__Infrastructure__PrometheusEndpoint=http://prometheus:9090
     volumes:
-      - ${PROJECT_ROOT:-..}/ApiGateway/appsettings.Docker.json:/app/appsettings.Docker.json:ro
+      - type: bind
+        source: ${PROJECT_ROOT}/ApiGateway/appsettings.Docker.json
+        target: /app/appsettings.Docker.json
+        read_only: true
     ports:
       - "${APIGATEWAY_PORT:-7237}:80"
     depends_on:
       - orderservice
       - inventoryservice
+      - loki
+      - tempo
+      - prometheus
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s
@@ -701,21 +736,34 @@ services:
 
   frontend:
     build:
-      context: .
-      dockerfile: ./FrontendService/Dockerfile
+      context: ${PROJECT_ROOT}
+      dockerfile: FrontendService/Dockerfile
     container_name: ${NAMESPACE:-insightops}_frontend
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
       - DataProtection__Keys=/app/Keys
+      - Observability__Docker__Infrastructure__LokiUrl=http://loki:3100
+      - Observability__Docker__Infrastructure__TempoEndpoint=http://tempo:4317
+      - Observability__Docker__Infrastructure__PrometheusEndpoint=http://prometheus:9090
     user: "1001:1001"
     volumes:
-      - ${PROJECT_ROOT:-..}/FrontendService/appsettings.Docker.json:/app/appsettings.Docker.json:ro
-      - keys_data:/app/Keys
+      - type: bind
+        source: ${PROJECT_ROOT}/FrontendService/appsettings.Docker.json
+        target: /app/appsettings.Docker.json
+        read_only: true
+      - type: volume
+        source: keys_data
+        target: /app/Keys
+        volume:
+          nocopy: true
     ports:
       - "${FRONTEND_PORT:-5010}:80"
     depends_on:
       - apigateway
+      - loki
+      - tempo
+      - prometheus
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
       interval: 30s
@@ -1470,44 +1518,77 @@ function Set-EnvironmentConfig {
     try {
         $envFile = Join-Path $script:CONFIG_PATH ".env.$Environment"
         Write-Info "Setting environment configuration for: $Environment"
-
         $envVars = @{
+            # Project Configuration
             NAMESPACE = $script:NAMESPACE
             ENVIRONMENT = $Environment
+            PROJECT_ROOT = $script:PROJECT_ROOT
+            CONFIG_PATH = $script:CONFIG_PATH
             ASPNETCORE_ENVIRONMENT = $Environment
+
+            # Database Configuration
             DB_PORT = if ($Environment -eq "Development") { "5433" } else { "5432" }
+            DB_USER = "insightops_user"
+            DB_PASSWORD = "insightops_pwd"
+            DB_NAME = "insightops_db"
+
+            # Service Ports
             FRONTEND_PORT = if ($Environment -eq "Development") { "5010" } else { "80" }
-            GATEWAY_PORT = if ($Environment -eq "Development") { "5011" } else { "8080" }
-            ORDER_PORT = if ($Environment -eq "Development") { "5012" } else { "8081" }
-            INVENTORY_PORT = if ($Environment -eq "Development") { "5013" } else { "8082" }
+            APIGATEWAY_PORT = if ($Environment -eq "Development") { "7237" } else { "80" }
+            ORDERSERVICE_PORT = if ($Environment -eq "Development") { "7265" } else { "80" }
+            INVENTORYSERVICE_PORT = if ($Environment -eq "Development") { "7070" } else { "80" }
+
+            # Observability Stack Ports
             GRAFANA_PORT = if ($Environment -eq "Development") { "3001" } else { "3000" }
             PROMETHEUS_PORT = if ($Environment -eq "Development") { "9091" } else { "9090" }
             LOKI_PORT = if ($Environment -eq "Development") { "3101" } else { "3100" }
             TEMPO_PORT = "4317"
             TEMPO_HTTP_PORT = "4318"
             TEMPO_QUERY_PORT = "3200"
+
+            # Observability Stack Credentials
             GRAFANA_USER = "admin"
             GRAFANA_PASSWORD = "InsightOps2024!"
-            DB_USER = "insightops_user"
-            DB_PASSWORD = "insightops_pwd"
-            DB_NAME = "insightops_db"
+
+            # Retention Settings
             METRICS_RETENTION = "30d"
             LOGS_RETENTION = "7d"
             TRACES_RETENTION = "48h"
+
+            # OpenTelemetry Configuration
             OTEL_EXPORTER_OTLP_ENDPOINT = "http://tempo:4317"
             OTEL_SERVICE_NAME = "insightops"
+
+            # Service URLs
             PROMETHEUS_URL = "http://prometheus:9090"
             LOKI_URL = "http://loki:3100"
             TEMPO_URL = "http://tempo:4317"
             GRAFANA_URL = "http://grafana:3000"
+
+            # Observability Infrastructure
+            OBSERVABILITY_LOKI_URL = "http://loki:3100"
+            OBSERVABILITY_TEMPO_ENDPOINT = "http://tempo:4317"
+            OBSERVABILITY_PROMETHEUS_ENDPOINT = "http://prometheus:9090"
+            
+            # Service Dependencies
+            SERVICE_APIGATEWAY_URL = if ($Environment -eq "Development") { "http://localhost:7237" } else { "http://apigateway" }
+            SERVICE_ORDERSERVICE_URL = if ($Environment -eq "Development") { "http://localhost:7265" } else { "http://orderservice" }
+            SERVICE_INVENTORYSERVICE_URL = if ($Environment -eq "Development") { "http://localhost:7070" } else { "http://inventoryservice" }
+            SERVICE_FRONTEND_URL = if ($Environment -eq "Development") { "http://localhost:5010" } else { "http://frontend" }
+        }
+
+        # Add Docker specific variables if not in Development
+        if ($Environment -ne "Development") {
+            $envVars["DOCKER_NETWORK"] = "${script:NAMESPACE}_network"
+            $envVars["COMPOSE_PROJECT_NAME"] = $script:NAMESPACE
         }
 
         $envContent = $envVars.GetEnumerator() | Sort-Object Key | ForEach-Object {
             "$($_.Key)=$($_.Value)"
         }
+
         $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllText($envFile, ($envContent -join "`n"), $utf8NoBomEncoding)
-
         Write-Success "Updated environment configuration: $envFile"
         return $true
     }

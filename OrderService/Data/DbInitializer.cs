@@ -8,7 +8,94 @@ namespace OrderService.Data
 {
     public static class DbInitializer
     {
-        public static async Task InitializeAsync(
+        public static async Task InitializeAsync(OrderDbContext context, ILogger logger)
+        {
+            try
+            {
+                // Create schema and set search path
+                await context.Database.ExecuteSqlRawAsync("CREATE SCHEMA IF NOT EXISTS orders;");
+                await context.Database.ExecuteSqlRawAsync("SET search_path TO orders,public;");
+
+                // Only try to create the migrations history table once
+                try
+                {
+                    await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS orders.__EFMigrationsHistory (
+                        MigrationId character varying(150) NOT NULL,
+                        ProductVersion character varying(32) NOT NULL,
+                        CONSTRAINT PK___EFMigrationsHistory PRIMARY KEY (MigrationId)
+                    );");
+                }
+                catch (PostgresException pgEx) when (pgEx.SqlState == "42P07")
+                {
+                    logger.LogInformation("Migration history table already exists");
+                }
+
+                // Check for pending migrations
+                var pendingMigrations = await context.Database.GetPendingMigrationsAsync();
+                var pendingMigrationsList = pendingMigrations.ToList();
+
+                if (pendingMigrationsList.Any())
+                {
+                    logger.LogInformation("Found {Count} pending migrations: {@Migrations}",
+                        pendingMigrationsList.Count,
+                        pendingMigrationsList);
+
+                    try
+                    {
+                        await context.Database.MigrateAsync();
+                        logger.LogInformation("Successfully applied pending migrations");
+                    }
+                    catch (PostgresException pgEx) when (pgEx.SqlState == "42P07")
+                    {
+                        logger.LogInformation("Tables already exist, continuing...");
+                    }
+                }
+
+                // Check if data needs to be seeded
+                if (!await context.Orders.AnyAsync())
+                {
+                    logger.LogInformation("Initializing seed data...");
+
+                    // Add sample orders
+                    var orders = new[]
+                    {
+                    new Order
+                    {
+                        ItemName = "Test Item 1",
+                        Quantity = 5,
+                        TotalPrice = 49.99M,
+                        Status = "Pending",
+                        OrderDate = DateTime.UtcNow
+                    },
+                    new Order
+                    {
+                        ItemName = "Test Item 2",
+                        Quantity = 3,
+                        TotalPrice = 29.99M,
+                        Status = "Pending",
+                        OrderDate = DateTime.UtcNow
+                    }
+                };
+
+                    await context.Orders.AddRangeAsync(orders);
+                    await context.SaveChangesAsync();
+                    logger.LogInformation("Seed data initialized successfully");
+                }
+                else
+                {
+                    logger.LogInformation("Database already contains data");
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "An error occurred during database initialization");
+                throw new Exception("Database initialization failed", ex);
+            }
+        }
+
+
+        public static async Task _InitializeAsync(
             OrderDbContext context,
             ILogger logger)
         {

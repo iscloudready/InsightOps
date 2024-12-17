@@ -2,7 +2,7 @@
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 USER root
 WORKDIR /app
-EXPOSE 80
+#EXPOSE 80
 EXPOSE 5010
 
 # Install required tools
@@ -17,14 +17,26 @@ RUN apt-get update \
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY ["FrontendService.csproj", "."]
-RUN dotnet restore "FrontendService.csproj"
-COPY . .
+
+# Copy all csproj files first for better layer caching
+COPY ["InsightOps.Observability/Observability.csproj", "InsightOps.Observability/"]
+COPY ["FrontendService/FrontendService.csproj", "FrontendService/"]
+
+# Restore NuGet packages
+RUN dotnet restore "InsightOps.Observability/Observability.csproj" && \
+    dotnet restore "FrontendService/FrontendService.csproj"
+
+# Copy everything else
+COPY ["InsightOps.Observability/", "InsightOps.Observability/"]
+COPY ["FrontendService/", "FrontendService/"]
+
+# Build the Frontend project
+WORKDIR "/src/FrontendService"
 RUN dotnet build "FrontendService.csproj" -c Release -o /app/build
 
-# Publish
+# Publish stage
 FROM build AS publish
-RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "FrontendService.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
 # Final stage
 FROM base AS final

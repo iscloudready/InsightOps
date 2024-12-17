@@ -17,9 +17,21 @@ RUN apt-get update \
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY ["InventoryService.csproj", "."]
-RUN dotnet restore "InventoryService.csproj"
-COPY . .
+
+# Copy csproj files first
+COPY ["InsightOps.Observability/Observability.csproj", "InsightOps.Observability/"]
+COPY ["InventoryService/InventoryService.csproj", "InventoryService/"]
+
+# Restore NuGet packages
+RUN dotnet restore "InsightOps.Observability/Observability.csproj" && \
+    dotnet restore "InventoryService/InventoryService.csproj"
+
+# Copy everything else
+COPY ["InsightOps.Observability/", "InsightOps.Observability/"]
+COPY ["InventoryService/", "InventoryService/"]
+
+# Build the project
+WORKDIR "/src/InventoryService"
 RUN dotnet build "InventoryService.csproj" -c Release -o /app/build
 
 # Publish stage
@@ -32,4 +44,4 @@ WORKDIR /app
 COPY --from=publish /app/publish .
 USER appuser
 ENV ASPNETCORE_ENVIRONMENT=Docker
-ENTRYPOINT ["dotnet", "InventoryService.dll"]
+ENTRYPOINT ["dotnet", "InventoryService.dll", "--wait-for-db"]

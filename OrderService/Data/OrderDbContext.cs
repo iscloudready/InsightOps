@@ -20,10 +20,15 @@ namespace OrderService.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            // Set schema for all tables
+            modelBuilder.HasDefaultSchema("orders");
+
             try
             {
                 modelBuilder.Entity<Order>(entity =>
                 {
+                    entity.ToTable("Orders", "orders");
+
                     // Primary Key
                     entity.HasKey(e => e.Id);
 
@@ -32,22 +37,18 @@ namespace OrderService.Data
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasComment("Name of the ordered item");
-
                     entity.Property(e => e.Quantity)
                         .IsRequired()
                         .HasComment("Quantity of items ordered");
-
                     entity.Property(e => e.TotalPrice)
                         .HasColumnType("decimal(18,2)")
                         .IsRequired()
                         .HasComment("Total price of the order");
-
                     entity.Property(e => e.Status)
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasDefaultValue("Pending")
                         .HasComment("Current status of the order");
-
                     entity.Property(e => e.OrderDate)
                         .IsRequired()
                         .HasDefaultValueSql("CURRENT_TIMESTAMP")
@@ -60,7 +61,7 @@ namespace OrderService.Data
                         .HasDatabaseName("IX_Orders_OrderDate");
 
                     // Table configuration
-                    entity.ToTable("Orders", b => b.HasComment("Stores all order information"));
+                    entity.ToTable("Orders", schema: "orders", b => b.HasComment("Stores all order information"));
                 });
             }
             catch (Exception ex)

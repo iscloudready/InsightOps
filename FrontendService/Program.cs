@@ -9,6 +9,7 @@ using InsightOps.Observability.Metrics;
 using InsightOps.Observability.Options;
 using InsightOps.Observability.SignalR;
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -55,6 +56,10 @@ builder.Services.AddControllersWithViews()
         options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
         options.JsonSerializerOptions.PropertyNamingPolicy = null;
     });
+
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo("/app/Keys"))
+    .SetApplicationName("InsightOps");
 
 var app = builder.Build();
 

@@ -9,6 +9,17 @@ $ErrorActionPreference = "Stop"
 $script:PROJECT_ROOT = $env:PROJECT_ROOT
 $script:CONFIG_PATH = $env:CONFIG_PATH
 
+# Add verification here
+Write-Verbose "Verifying core environment variables..."
+$requiredVars = @('PROJECT_ROOT', 'CONFIG_PATH', 'NAMESPACE')
+foreach ($var in $requiredVars) {
+    $value = Get-Item "env:$var" -ErrorAction SilentlyContinue
+    if (-not $value) {
+        throw "Required environment variable $var is not set"
+    }
+    Write-Verbose "Variable $var : $($value.Value)"
+}
+
 # Output path information for debugging
 Write-Verbose "PSScriptRoot: $PSScriptRoot"
 Write-Verbose "Project Root: $script:PROJECT_ROOT"

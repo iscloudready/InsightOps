@@ -17,9 +17,21 @@ RUN apt-get update \
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY ["OrderService.csproj", "."]
-RUN dotnet restore "OrderService.csproj"
-COPY . .
+
+# Copy csproj files first
+COPY ["InsightOps.Observability/Observability.csproj", "InsightOps.Observability/"]
+COPY ["OrderService/OrderService.csproj", "OrderService/"]
+
+# Restore NuGet packages
+RUN dotnet restore "InsightOps.Observability/Observability.csproj" && \
+    dotnet restore "OrderService/OrderService.csproj"
+
+# Copy everything else
+COPY ["InsightOps.Observability/", "InsightOps.Observability/"]
+COPY ["OrderService/", "OrderService/"]
+
+# Build the project
+WORKDIR "/src/OrderService"
 RUN dotnet build "OrderService.csproj" -c Release -o /app/build
 
 # Publish stage
@@ -32,4 +44,4 @@ WORKDIR /app
 COPY --from=publish /app/publish .
 USER appuser
 ENV ASPNETCORE_ENVIRONMENT=Docker
-ENTRYPOINT ["dotnet", "OrderService.dll"]
+ENTRYPOINT ["dotnet", "OrderService.dll", "--wait-for-db"]

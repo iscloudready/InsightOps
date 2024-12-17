@@ -282,24 +282,58 @@ function Test-ServiceHealth {
         
         $services = @{
             "db" = @{
-                Name = "Database"
+                Name = "PostgreSQL Database"
                 HealthCheck = "pg_isready"
+                Port = 5432
+                Endpoint = "/health"
             }
             "grafana" = @{
                 Name = "Grafana"
-                Port = 3001
+                Port = 3000  # Corrected from docs
+                Endpoint = "/api/health"
+                ExpectedResponse = '"database":"ok"'
             }
             "prometheus" = @{
                 Name = "Prometheus"
-                Port = 9091
+                Port = 9090  # Corrected from docs
+                Endpoint = "/-/healthy"
+                ExpectedResponse = "Prometheus Server is Healthy"
             }
             "loki" = @{
                 Name = "Loki"
-                Port = 3101
+                Port = 3100  # Corrected from docs
+                Endpoint = "/ready"
+                ExpectedResponse = "ready"
             }
             "tempo" = @{
                 Name = "Tempo"
-                Port = 4317
+                Port = 4317  # Verified from docs
+                Endpoint = "/status"
+                ExpectedResponse = "OK"
+            }
+            "apigateway" = @{  # Added from Frontend Service docs
+                Name = "API Gateway"
+                Port = 7237
+                Endpoint = "/health"
+                ExpectedResponse = "Healthy"
+            }
+            "orderservice" = @{  # Added from Frontend Service docs
+                Name = "Order Service"
+                Port = 80
+                Endpoint = "/health"
+                ExpectedResponse = "Healthy"
+            }
+            "inventoryservice" = @{  # Added from Frontend Service docs
+                Name = "Inventory Service"
+                Port = 80
+                Endpoint = "/health"
+                ExpectedResponse = "Healthy"
+            }
+            "frontendservice" = @{  # Added from Frontend Service docs
+                Name = "Frontend Service"
+                Port = 80
+                Endpoint = "/health"
+                ExpectedResponse = "Healthy"
             }
         }
 

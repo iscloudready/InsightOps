@@ -17,9 +17,21 @@ RUN apt-get update \
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY ["ApiGateway.csproj", "."]
-RUN dotnet restore "ApiGateway.csproj"
-COPY . .
+
+# Copy csproj files first
+COPY ["InsightOps.Observability/Observability.csproj", "InsightOps.Observability/"]
+COPY ["ApiGateway/ApiGateway.csproj", "ApiGateway/"]
+
+# Restore NuGet packages
+RUN dotnet restore "InsightOps.Observability/Observability.csproj" && \
+    dotnet restore "ApiGateway/ApiGateway.csproj"
+
+# Copy everything else
+COPY ["InsightOps.Observability/", "InsightOps.Observability/"]
+COPY ["ApiGateway/", "ApiGateway/"]
+
+# Build the project
+WORKDIR "/src/ApiGateway"
 RUN dotnet build "ApiGateway.csproj" -c Release -o /app/build
 
 # Publish stage
