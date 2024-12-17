@@ -46,6 +46,12 @@
                                 <i class="fab fa-docker"></i> Docker
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link @(ViewContext.RouteData.Values["Controller"]?.ToString() == "ServiceHealth" ? "active" : "")"
+                               asp-controller="ServiceHealth" asp-action="Index">
+                                <i class="fas fa-heartbeat"></i> Health
+                            </a>
+                        </li>
                     </ul>
                 </div>
             </div>
