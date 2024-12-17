@@ -2,37 +2,52 @@
 using FrontendService.Services;
 using Microsoft.AspNetCore.Mvc;
 
+[Route("[controller]")]
 public class InventoryController : Controller
 {
     private readonly IInventoryService _inventoryService;
     private readonly ILogger<InventoryController> _logger;
+    private readonly IWebHostEnvironment _environment;
 
     public InventoryController(
         IInventoryService inventoryService,
-        ILogger<InventoryController> logger)
+        ILogger<InventoryController> logger,
+        IWebHostEnvironment environment)
     {
         _inventoryService = inventoryService;
         _logger = logger;
+        _environment = environment;
     }
 
     [HttpGet]
+    [Route("")]
     public async Task<IActionResult> Index()
     {
         try
         {
             _logger.LogInformation("Loading inventory page");
+            _logger.LogInformation("Using service URL: {ServiceUrl}",
+                _inventoryService.GetServiceUrl());
+
             var inventory = await _inventoryService.GetAllItemsAsync();
+            _logger.LogInformation("Retrieved {Count} inventory items",
+                inventory?.Count() ?? 0);
             return View(inventory);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error loading inventory page");
+            if (_environment.IsDevelopment())
+            {
+                ViewBag.ErrorDetails = ex.ToString();
+            }
             TempData["Error"] = "Failed to load inventory. Please try again.";
             return View("Error");
         }
     }
 
     [HttpPost]
+    [Route("add")]
     public async Task<IActionResult> AddInventoryItem([FromForm] InventoryItemDto model)
     {
         try
@@ -53,6 +68,7 @@ public class InventoryController : Controller
     }
 
     [HttpPost]
+    [Route("add-item")]
     public async Task<IActionResult> AddItem([FromForm] InventoryItemDto model)
     {
         try
@@ -77,6 +93,7 @@ public class InventoryController : Controller
     }
 
     [HttpPost]
+    [Route("update-stock")]
     public async Task<IActionResult> UpdateStock(int id, int quantity)
     {
         try
@@ -92,6 +109,7 @@ public class InventoryController : Controller
     }
 
     [HttpGet]
+    [Route("lowstock")]
     public async Task<IActionResult> GetLowStock()
     {
         try
@@ -105,56 +123,4 @@ public class InventoryController : Controller
             return Json(new { success = false, message = ex.Message });
         }
     }
-
-    //[HttpDelete]
-    //public async Task<IActionResult> DeleteItem(int id)
-    //{
-    //    try
-    //    {
-    //        await _inventoryService.DeleteItemAsync(id);
-    //        return Json(new { success = true });
-    //    }
-    //    catch (Exception ex)
-    //    {
-    //        _logger.LogError(ex, "Error deleting inventory item");
-    //        return Json(new { success = false, message = ex.Message });
-    //    }
-    //}
-
-    //// Add these methods to InventoryController
-    //[HttpGet]
-    //public async Task<IActionResult> StockHistory(int id)
-    //{
-    //    try
-    //    {
-    //        var history = await _inventoryService.GetStockHistory(id);
-    //        return Json(history);
-    //    }
-    //    catch (Exception ex)
-    //    {
-    //        _logger.LogError(ex, "Error getting stock history");
-    //        return Json(new { success = false, message = ex.Message });
-    //    }
-    //}
-
-    //[HttpGet]
-    //public async Task<IActionResult> GetMetrics()
-    //{
-    //    try
-    //    {
-    //        var metrics = new
-    //        {
-    //            totalItems = await _inventoryService.GetTotalItemCount(),
-    //            lowStockCount = (await _inventoryService.GetLowStockItemsAsync()).Count(),
-    //            totalValue = await _inventoryService.GetTotalInventoryValue(),
-    //            recentRestocks = await _inventoryService.GetRecentRestocks()
-    //        };
-    //        return Json(metrics);
-    //    }
-    //    catch (Exception ex)
-    //    {
-    //        _logger.LogError(ex, "Error getting inventory metrics");
-    //        return Json(new { success = false, message = ex.Message });
-    //    }
-    //}
 }

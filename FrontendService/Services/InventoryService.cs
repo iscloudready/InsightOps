@@ -10,7 +10,9 @@ namespace FrontendService.Services
         private readonly ILogger<InventoryService> _logger;
         private readonly IConfiguration _configuration;
 
-        public InventoryService(IHttpClientFactory clientFactory, IConfiguration configuration,
+        public InventoryService(
+            IHttpClientFactory clientFactory,
+            IConfiguration configuration,
             ILogger<InventoryService> logger)
         {
             _httpClient = clientFactory.CreateClient("ApiGateway");
@@ -21,7 +23,49 @@ namespace FrontendService.Services
             _httpClient.BaseAddress = new Uri(apiGatewayUrl ?? "http://localhost:7237");
         }
 
+        public string GetServiceUrl() => _httpClient.BaseAddress?.ToString() ?? "Not configured";
+
         public async Task<IEnumerable<InventoryItemDto>> GetAllItemsAsync()
+        {
+            try
+            {
+                _logger.LogInformation("Making request to: {BaseUrl}/api/gateway/inventory",
+                    _httpClient.BaseAddress);
+
+                var response = await _httpClient.GetAsync("/api/gateway/inventory");
+                var content = await response.Content.ReadAsStringAsync();  // Move this up
+
+                _logger.LogInformation("Response Status: {Status}, Content: {Content}",
+                    response.StatusCode, content);
+
+                response.EnsureSuccessStatusCode();
+
+                var items = JsonSerializer.Deserialize<IEnumerable<InventoryItemDto>>(content,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                    ?? Enumerable.Empty<InventoryItemDto>();
+
+                _logger.LogInformation("Deserialized {Count} items", items.Count());
+                return items;
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "HTTP request error. Base URL: {BaseUrl}, Error: {Error}",
+                    _httpClient.BaseAddress, ex.Message);
+                throw;
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "JSON deserialization error. Error: {Error}", ex.Message);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error getting inventory items");
+                throw;
+            }
+        }
+
+        public async Task<IEnumerable<InventoryItemDto>> _GetAllItemsAsync()
         {
             try
             {

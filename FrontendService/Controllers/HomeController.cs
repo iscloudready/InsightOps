@@ -38,6 +38,11 @@ public class HomeController : Controller
         _realTimeMetrics = realTimeMetrics;
     }
 
+    public IActionResult Index()
+    {
+        return View();
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetDashboardData()
     {
@@ -405,11 +410,6 @@ public class HomeController : Controller
             ErrorRate = Random.Shared.NextDouble() / 100,
             AverageResponseTime = Random.Shared.Next(50, 200)
         };
-    }
-
-    public IActionResult Index()
-    {
-        return View();
     }
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]

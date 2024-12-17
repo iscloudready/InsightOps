@@ -17,5 +17,6 @@ namespace FrontendService.Services
         Task<IEnumerable<InventoryItemDto>> GetLowStockItemsAsync();
         Task<InventoryItemDto> UpdateStockAsync(int id, int quantity);
         Task<InventoryItemDto> CreateItemAsync(InventoryItemDto item);
+        string GetServiceUrl();
     }
 }
