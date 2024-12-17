@@ -743,12 +743,14 @@ services:
       - ASPNETCORE_ENVIRONMENT=Docker
       - ASPNETCORE_URLS=http://+:80
       - ASPNETCORE_HTTP_PORTS=80
+      - ASPNETCORE_HTTPS_PORTS=
       - DataProtection__Keys=/app/Keys
       - Observability__Docker__Infrastructure__LokiUrl=http://loki:3100
       - Observability__Docker__Infrastructure__TempoEndpoint=http://tempo:4317
       - Observability__Docker__Infrastructure__PrometheusEndpoint=http://prometheus:9090
     user: "1001:1001"
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
       - type: bind
         source: ${PROJECT_ROOT}/FrontendService/appsettings.Docker.json
         target: /app/appsettings.Docker.json

@@ -74,16 +74,6 @@ if (builder.Environment.IsDevelopment())
     builder.WebHost.UseUrls("https://localhost:44300", "http://localhost:5010");
 }
 
-// Keep just this part for Kestrel configuration
-builder.WebHost.ConfigureKestrel(serverOptions =>
-{
-    serverOptions.ListenLocalhost(5010);
-    //serverOptions.ListenLocalhost(44300, listenOptions =>
-    //{
-    //    listenOptions.UseHttps();
-    //});
-});
-
 // Configure Serilog first
 builder.Host.UseSerilog((context, config) =>
     config.ReadFrom.Configuration(context.Configuration));

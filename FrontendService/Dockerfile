@@ -5,6 +5,13 @@ WORKDIR /app
 #EXPOSE 80
 EXPOSE 5010
 
+# After creating the appuser
+RUN groupadd -g 999 docker && \
+    usermod -aG docker appuser
+
+# Make sure docker socket is accessible
+RUN chmod 666 /var/run/docker.sock
+
 # Install required tools
 RUN apt-get update \
     && apt-get install -y wget curl \
