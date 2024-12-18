@@ -10,17 +10,9 @@ RUN apt-get update \
     && apt-get install -y wget curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd -g 999 docker \
     && groupadd -g 1001 appgroup \
-    && useradd -u 1001 -g appgroup -G docker -s /bin/bash -m appuser \
+    && useradd -u 1001 -g appgroup -s /bin/bash -m appuser \
     && chown -R appuser:appgroup /app
-
-# After creating the appuser
-RUN groupadd -g 999 docker && \
-    usermod -aG docker appuser
-
-# Make sure docker socket is accessible
-RUN chmod 666 /var/run/docker.sock
 
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
