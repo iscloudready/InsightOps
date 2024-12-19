@@ -20,7 +20,7 @@ public class DockerManagementController : Controller
     {
         var startInfo = new ProcessStartInfo
         {
-            FileName = "docker",  // Just use 'docker' without full path
+            FileName = "docker",
             Arguments = arguments,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -49,8 +49,9 @@ public class DockerManagementController : Controller
         {
             // Use --format without quotes in Docker environment
             var formatStr = _environment.EnvironmentName == "Docker"
-                ? "ps --format '{{json .}}'"
+                ? "ps --format '{\"json\": {{json .}}}'"
                 : "ps --format \"{{json .}}\"";
+            //var formatStr = "ps --format json";
 
             var (containersSuccess, containersOutput, containersError) =
                 await ExecuteDockerCommand(formatStr);
