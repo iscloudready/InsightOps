@@ -237,12 +237,12 @@ using (var scope = app.Services.CreateScope())
         }
 
         // Check if we need to seed data
-        var hasData = await context.Database.ExecuteSqlRawAsync(@"
-        SELECT EXISTS (
-            SELECT 1 FROM inventory.""InventoryItems"" LIMIT 1
-        )");
+        var hasData = await context.InventoryItems.AnyAsync();  //await context.Database.ExecuteSqlRawAsync(@"
+        //SELECT EXISTS (
+        //    SELECT 1 FROM inventory.""InventoryItems"" LIMIT 1
+        //)");
 
-        if (hasData == 0)
+        if (!hasData)
         {
             logger.LogInformation("Initializing inventory seed data...");
 
