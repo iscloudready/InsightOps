@@ -8,7 +8,9 @@ public class DockerManagementController : Controller
     private readonly ILogger<DockerManagementController> _logger;
     private readonly IWebHostEnvironment _environment;
 
-    public DockerManagementController(ILogger<DockerManagementController> logger, IWebHostEnvironment environment)
+    public DockerManagementController(
+        ILogger<DockerManagementController> logger,
+        IWebHostEnvironment environment)
     {
         _logger = logger;
         _environment = environment;
@@ -16,24 +18,112 @@ public class DockerManagementController : Controller
 
     private ProcessStartInfo GetDockerProcessInfo(string arguments)
     {
-        var isDocker = _environment.EnvironmentName == "Docker";
         var startInfo = new ProcessStartInfo
         {
-            FileName = "docker",
+            FileName = "docker",  // Just use 'docker' without full path
             Arguments = arguments,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
-            WorkingDirectory = isDocker ? "/" : AppDomain.CurrentDomain.BaseDirectory
+            WorkingDirectory = "/"
         };
 
-        if (isDocker)
+        if (_environment.EnvironmentName == "Docker")
         {
-            startInfo.EnvironmentVariables["DOCKER_HOST"] = "unix:///var/run/docker.sock";
+            startInfo.Environment["DOCKER_HOST"] = "unix:///var/run/docker.sock";
+            startInfo.Arguments = startInfo.Arguments.Replace("\"", "'");
         }
 
+        _logger.LogInformation("Executing Docker command: {FileName} {Arguments} in {Env}",
+            startInfo.FileName, startInfo.Arguments, _environment.EnvironmentName);
+
         return startInfo;
+    }
+
+    public async Task<IActionResult> Index()
+    {
+        var model = new DockerManagementViewModel();
+
+        try
+        {
+            // Use --format without quotes in Docker environment
+            var formatStr = _environment.EnvironmentName == "Docker"
+                ? "ps --format '{{json .}}'"
+                : "ps --format \"{{json .}}\"";
+
+            var (containersSuccess, containersOutput, containersError) =
+                await ExecuteDockerCommand(formatStr);
+
+            if (!containersSuccess)
+            {
+                _logger.LogError("Failed to get containers: {Error}", containersError);
+                model.Error = $"Failed to get containers: {containersError}";
+                return View(model);
+            }
+
+            if (!string.IsNullOrEmpty(containersOutput))
+            {
+                try
+                {
+                    model.Containers = containersOutput
+                        .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(json =>
+                        {
+                            _logger.LogDebug("Parsing container JSON: {Json}", json);
+                            return JsonSerializer.Deserialize<ContainerInfo>(json);
+                        })
+                        .Where(c => c != null)
+                        .ToList();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error parsing container output: {Output}", containersOutput);
+                    model.Error = "Error parsing container data";
+                    return View(model);
+                }
+            }
+
+            // Use --format without quotes in Docker environment
+            formatStr = _environment.EnvironmentName == "Docker"
+                ? "images --format '{{json .}}'"
+                : "images --format \"{{json .}}\"";
+
+            var (imagesSuccess, imagesOutput, imagesError) =
+                await ExecuteDockerCommand(formatStr);
+
+            if (!imagesSuccess)
+            {
+                _logger.LogError("Failed to get images: {Error}", imagesError);
+                model.Error = $"Failed to get images: {imagesError}";
+                return View(model);
+            }
+
+            if (!string.IsNullOrEmpty(imagesOutput))
+            {
+                try
+                {
+                    model.Images = imagesOutput
+                        .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(json => JsonSerializer.Deserialize<ImageInfo>(json))
+                        .Where(i => i != null)
+                        .ToList();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error parsing image output: {Output}", imagesOutput);
+                    model.Error = "Error parsing image data";
+                    return View(model);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in Docker management index");
+            model.Error = $"Error accessing Docker: {ex.Message}";
+        }
+
+        return View(model);
     }
 
     private async Task<(bool success, string output, string error)> ExecuteDockerCommand(string arguments)
@@ -52,74 +142,16 @@ public class DockerManagementController : Controller
             var output = await outputTask;
             var error = await errorTask;
 
-            _logger.LogInformation("Docker command executed: {Arguments}, Exit Code: {ExitCode}", arguments, process.ExitCode);
+            _logger.LogInformation("Docker command result - Exit Code: {ExitCode}, Output: {Output}, Error: {Error}",
+                process.ExitCode, output, error);
 
-            if (process.ExitCode != 0)
-            {
-                _logger.LogError("Docker command failed: {Error}", error);
-                return (false, output, error);
-            }
-
-            return (true, output, error);
+            return (process.ExitCode == 0, output, error);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to execute docker command: {Arguments}", arguments);
+            _logger.LogError(ex, "Error executing Docker command: {Arguments}", arguments);
             return (false, string.Empty, ex.Message);
         }
-    }
-
-    public async Task<IActionResult> Index()
-    {
-        var model = new DockerManagementViewModel();
-
-        try
-        {
-            // Get containers
-            var (containersSuccess, containersOutput, containersError) = await ExecuteDockerCommand("ps --format \"{{json .}}\"");
-            if (!containersSuccess)
-            {
-                model.Error = $"Failed to get containers: {containersError}";
-                return View(model);
-            }
-
-            model.Containers = containersOutput
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                .Select(json => JsonSerializer.Deserialize<ContainerInfo>(json))
-                .Where(c => c != null)
-                .ToList();
-
-            // Get images
-            var (imagesSuccess, imagesOutput, imagesError) = await ExecuteDockerCommand("images --format \"{{json .}}\"");
-            if (!imagesSuccess)
-            {
-                model.Error = $"Failed to get images: {imagesError}";
-                return View(model);
-            }
-
-            model.Images = imagesOutput
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                .Select(json => JsonSerializer.Deserialize<ImageInfo>(json))
-                .Where(i => i != null)
-                .ToList();
-
-            // Get system info
-            var (systemSuccess, systemOutput, systemError) = await ExecuteDockerCommand("system df --format \"{{json .}}\"");
-            if (!systemSuccess)
-            {
-                model.Error = $"Failed to get system info: {systemError}";
-                return View(model);
-            }
-
-            model.SystemInfo = JsonSerializer.Deserialize<SystemInfo>(systemOutput);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching Docker information");
-            model.Error = $"Failed to execute docker command: {ex.Message}. Please ensure Docker is installed and running.";
-        }
-
-        return View(model);
     }
 
     [HttpPost]
@@ -137,7 +169,7 @@ public class DockerManagementController : Controller
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error performing {Action} on container {ContainerId}", action, containerId);
+            _logger.LogError(ex, $"Error performing {action} on container {containerId}");
             return Json(new { success = false, error = ex.Message });
         }
     }
@@ -157,7 +189,7 @@ public class DockerManagementController : Controller
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting logs for container {ContainerId}", containerId);
+            _logger.LogError(ex, $"Error getting logs for container {containerId}");
             return Json(new { success = false, error = ex.Message });
         }
     }

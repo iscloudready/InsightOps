@@ -3,16 +3,39 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 USER root
 WORKDIR /app
 #EXPOSE 80
-EXPOSE 5010
 
 # Install required tools
-RUN apt-get update \
-    && apt-get install -y wget curl \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd -g 1001 appgroup \
-    && useradd -u 1001 -g appgroup -s /bin/bash -m appuser \
-    && chown -R appuser:appgroup /app
+RUN apt-get update && \
+    apt-get install -y \
+        apt-transport-https \
+        ca-certificates \
+        curl \
+        gnupg \
+        lsb-release && \
+    install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
+    chmod a+r /etc/apt/keyrings/docker.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+    $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && \
+    apt-get install -y docker-ce-cli && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd -g 999 docker && \
+    groupadd -g 1001 appgroup && \
+    useradd -u 1001 -g appgroup -G docker -s /bin/bash -m appuser && \
+    mkdir -p /app/Keys && \
+    chown -R appuser:docker /app && \
+    chmod 755 /app/Keys && \
+    chmod 777 /var/run && \
+    chmod 666 /var/run/docker.sock && \
+    chmod -R 755 /var/run/docker && \
+    chmod 777 /tmp
+
+# After installing Docker CLI
+ENV PATH="/usr/bin:${PATH}"
+
+EXPOSE 5010
 
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
