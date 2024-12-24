@@ -5,7 +5,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using OrderService.Repositories;
-using OrderService.Data; // Add this for DbInitializer
+using OrderService.Data;
 using System.Reflection;
 using System.Text.Json;
 using OrderService.Interfaces;
@@ -14,52 +14,39 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Npgsql;
 using Polly;
+using InsightOps.Observability.Extensions;
+using InsightOps.Observability.Options;
+using InsightOps.Observability.SignalR;
+using Microsoft.AspNetCore.SignalR;
+using Serilog;
 
-static async Task HandleDuplicateKeyViolation(DbContext context, PostgresException ex)
-{
-    // Add specific handling based on the table/constraint involved
-    if (ex.TableName == "InventoryItems" || ex.TableName == "Orders")
-    {
-        await context.Database.MigrateAsync();
-    }
-    else
-    {
-        //throw; // Rethrow if we can't handle this specific violation
-    }
-}
-static async Task ResetDatabase(OrderDbContext context)
-{
-    await context.Database.ExecuteSqlRawAsync(@"
-        DROP SCHEMA IF EXISTS orders CASCADE;
-        CREATE SCHEMA orders;
-        SET search_path TO orders,public;
-    ");
-}
-static async Task WaitForDatabase(OrderDbContext context, ILogger logger, int maxRetries = 30)
+static async Task WaitForDatabase(OrderDbContext context, Microsoft.Extensions.Logging.ILogger<Program> logger, int maxRetries = 30)
 {
     for (int i = 0; i < maxRetries; i++)
     {
         try
         {
+            // Attempt to connect to the database
             await context.Database.CanConnectAsync();
-            logger.LogInformation("Successfully connected to database");
+            logger.LogInformation("Successfully connected to the database.");
             return;
         }
-        catch (PostgresException ex) when (ex.SqlState == "57P03") // database is starting up
+        catch (PostgresException ex) when (ex.SqlState == "57P03")  // Database is starting up
         {
             logger.LogWarning("Database is starting up. Attempt {Attempt} of {MaxRetries}. Waiting 2 seconds...",
                 i + 1, maxRetries);
-            await Task.Delay(2000); // Wait 2 seconds before retrying
+            await Task.Delay(2000);  // Wait for 2 seconds before retrying
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Unexpected error while waiting for database");
+            logger.LogError(ex, "Unexpected error while waiting for the database to become available.");
             throw;
         }
     }
 
-    throw new TimeoutException("Database did not become available in time");
+    throw new TimeoutException("Database did not become available within the specified retries.");
 }
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -77,22 +64,19 @@ builder.Services.AddSwaggerGen(c =>
     c.IncludeXmlComments(xmlPath);
 });
 
+// Configure appsettings
 builder.Configuration
     .SetBasePath(Directory.GetCurrentDirectory())
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
     .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
     .AddEnvironmentVariables();
 
-builder.Services.AddHealthChecks()
-    .AddCheck("self", () => HealthCheckResult.Healthy());
-
 // Configure PostgreSQL Database connection with retry policy
 builder.Services.AddDbContext<OrderDbContext>((serviceProvider, options) =>
 {
-    var logger = serviceProvider.GetRequiredService<ILogger<OrderDbContext>>();
+    var logger = serviceProvider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<OrderDbContext>>();
     var connectionString = builder.Configuration.GetConnectionString("Postgres");
 
-    // Add default schema to connection string
     connectionString = $"{connectionString};SearchPath=orders,public";
 
     options.UseNpgsql(connectionString, npgsqlOptions =>
@@ -105,178 +89,69 @@ builder.Services.AddDbContext<OrderDbContext>((serviceProvider, options) =>
     });
 });
 
-// Add OrderRepository as a scoped service
+// Register Observability Services
+builder.Services.Configure<ObservabilityOptions>(
+    builder.Configuration.GetSection("Observability"));
+
+// Register SignalR services (Fix for IHubContext)
+builder.Services.AddSignalR();
+
+// Register MetricsHub and Background Service
+builder.Services.AddSingleton<MetricsHub>();
+builder.Services.AddHostedService<MetricsBackgroundService>();
+
+// Add Centralized Observability
+builder.Services.AddInsightOpsObservability(
+    builder.Configuration,
+    "OrderService",
+    options => {
+        options.Common.ServiceName = "OrderService";
+        options.Common.MetricsEndpoint = "/metrics";
+        options.Common.HealthCheckEndpoint = "/health";
+    });
+
+// Register Services
 builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 builder.Services.AddScoped<OrderService.Services.IOrderService, OrderService.Services.OrderService>();
 
-// Add Authorization services
+// Authorization
 builder.Services.AddAuthorization();
-
 builder.Services.AddControllers();
 
-builder.Services.AddHealthChecks();
+// Health Checks
+builder.Services.AddHealthChecks()
+    .AddCheck("self", () => HealthCheckResult.Healthy());
 
 // Configure Swagger
 builder.Services.AddEndpointsApiExplorer();
 
-// Configure HttpClient for the OrderService
-builder.Services.AddHttpClient("OrderService", client =>
-{
-    client.BaseAddress = new Uri("http://localhost:5000");
-});
-
-// Add OpenTelemetry for both Metrics and Tracing
-builder.Services.AddOpenTelemetry()
-    .WithTracing(tracerProviderBuilder =>
-    {
-        tracerProviderBuilder
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddOtlpExporter(options =>
-            {
-                options.Endpoint = new Uri("http://localhost:4317"); // Adjust based on OTLP endpoint (e.g., Tempo)
-            })
-            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("OrderService"));
-    })
-    .WithMetrics(metricProviderBuilder =>
-    {
-        metricProviderBuilder
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddRuntimeInstrumentation()
-            .AddPrometheusExporter();
-    });
-
-// Build and configure the app
 var app = builder.Build();
 
-app.MapHealthChecks("/health", new HealthCheckOptions
-{
-    ResponseWriter = async (context, report) =>
-    {
-        context.Response.ContentType = "application/json";
-        var response = new
-        {
-            status = report.Status.ToString(),
-            checks = report.Entries.Select(x => new
-            {
-                name = x.Key,
-                status = x.Value.Status.ToString(),
-                description = x.Value.Description
-            })
-        };
-        await JsonSerializer.SerializeAsync(context.Response.Body, response);
-    }
-});
-
-// Enhanced database initialization with migrations and seeding
+// Initialize Database
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
-    var logger = services.GetRequiredService<ILogger<Program>>();
-    OrderDbContext context = null;  // Declare context outside try block
+    var logger = services.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Program>>();
+    var context = services.GetRequiredService<OrderDbContext>();
 
     try
     {
-        logger.LogInformation("Starting database initialization...");
-        context = services.GetRequiredService<OrderDbContext>();
+        logger.LogInformation("Starting order database initialization...");
 
         // Wait for database to be ready
         await WaitForDatabase(context, logger);
 
-        // Create schema and make it part of search path
-        await context.Database.ExecuteSqlRawAsync("CREATE SCHEMA IF NOT EXISTS orders;");
-        await context.Database.ExecuteSqlRawAsync("SET search_path TO orders,public;");
-
-        // First check database connectivity
-        if (!(await context.Database.CanConnectAsync()))
-        {
-            logger.LogInformation("Database connection not established. Creating database...");
-            await context.Database.EnsureCreatedAsync();
-        }
-
-        // Move migration history table to orders schema
-        await context.Database.ExecuteSqlRawAsync(@"
-        CREATE TABLE IF NOT EXISTS orders.__EFMigrationsHistory (
-            MigrationId character varying(150) NOT NULL,
-            ProductVersion character varying(32) NOT NULL,
-            CONSTRAINT PK___EFMigrationsHistory PRIMARY KEY (MigrationId)
-        );");
-
-        // Check for pending migrations
-        var pendingMigrations = await context.Database.GetPendingMigrationsAsync();
-        var pendingMigrationsList = pendingMigrations.ToList();
-
-        if (pendingMigrationsList.Any())
-        {
-            logger.LogInformation("Found {Count} pending migrations: {@Migrations}",
-                pendingMigrationsList.Count,
-                pendingMigrationsList);
-            await context.Database.MigrateAsync();
-            logger.LogInformation("Successfully applied pending migrations");
-        }
-        else
-        {
-            logger.LogInformation("No pending migrations found. Database is up to date.");
-        }
-
-        // Check if we need to seed data
-        var hasData = await context.Orders.AnyAsync();
-        if (!hasData)
-        {
-            logger.LogInformation("Initializing seed data...");
-            await DbInitializer.InitializeAsync(context, logger);
-            logger.LogInformation("Seed data initialization completed");
-        }
-        else
-        {
-            logger.LogInformation("Database already contains data. Skipping seed initialization.");
-        }
-
+        await context.Database.MigrateAsync();
         logger.LogInformation("Database initialization completed successfully");
-    }
-    catch (PostgresException pgEx)
-    {
-        logger.LogError(pgEx, "PostgreSQL error during database initialization. Error Code: {ErrorCode}, Detail: {Detail}",
-            pgEx.SqlState,
-            pgEx.Detail);
-
-        if (context != null)
-        {
-
-            switch (pgEx.SqlState)
-            {
-                case "42P07": // Table already exists
-                    logger.LogInformation("Schema objects already exist, continuing with migrations...");
-                    await context.Database.MigrateAsync();
-                    break;
-                case "23505": // Unique violation
-                    logger.LogWarning("Duplicate key detected during initialization, attempting recovery...");
-                    await HandleDuplicateKeyViolation(context, pgEx);
-                    break;
-                case "42P06": // Schema already exists
-                    logger.LogInformation("Schema already exists, continuing...");
-                    break;
-                case "57P03": // database is starting up
-                    logger.LogWarning("Database is starting up, waiting...");
-                    await WaitForDatabase(context, logger);
-                    break;
-                default:
-                    throw; // Rethrow unknown Postgres errors
-            }
-        }
-        else
-        {
-            throw;
-        }
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "An unexpected error occurred while initializing the inventory database: {Message}", ex.Message);
+        logger.LogError(ex, "Database initialization failed");
         throw;
     }
 }
 
+// Configure Error Handling
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>
@@ -292,13 +167,7 @@ app.UseExceptionHandler(errorApp =>
     });
 });
 
-// Map Prometheus endpoint for scraping metrics
-app.MapPrometheusScrapingEndpoint("/metrics");
-
-// Map health check endpoint
-app.MapHealthChecks("/health");
-
-// Configure the HTTP request pipeline.
+// Development tools (Swagger)
 if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
 {
     app.UseSwagger();
@@ -309,10 +178,49 @@ if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docke
     });
 }
 
+// Configure Middleware Pipeline
 app.UseRouting();
+app.UseInsightOpsObservability();
+app.UseAuthorization();
+
+// Map Endpoints
 app.UseEndpoints(endpoints =>
 {
     endpoints.MapControllers();
+    endpoints.MapHub<MetricsHub>("/metrics-hub"); // Map SignalR Hub
+    endpoints.MapHealthChecks("/health", new HealthCheckOptions
+    {
+        ResponseWriter = async (context, report) =>
+        {
+            context.Response.ContentType = "application/json";
+            var response = new
+            {
+                status = report.Status.ToString(),
+                checks = report.Entries.Select(x => new
+                {
+                    name = x.Key,
+                    status = x.Value.Status.ToString(),
+                    description = x.Value.Description
+                })
+            };
+            await JsonSerializer.SerializeAsync(context.Response.Body, response);
+        }
+    });
+    endpoints.MapPrometheusScrapingEndpoint("/metrics");
 });
 
-app.Run();
+// Run the App
+try
+{
+    Log.Information("Starting OrderService...");
+    await app.RunAsync();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Application failed to start");
+    throw;
+}
+finally
+{
+    Log.CloseAndFlush();
+}

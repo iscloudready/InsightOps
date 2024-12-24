@@ -1,26 +1,20 @@
 using Microsoft.OpenApi.Models;
 using Microsoft.AspNetCore.Builder;
-using OpenTelemetry;
-using OpenTelemetry.Extensions.Hosting;
-using OpenTelemetry.Instrumentation.AspNetCore;
-using OpenTelemetry.Instrumentation.Http;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
-using System.Reflection;
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.SignalR;
 using System.Text.Json;
 using Polly;
 using Polly.Extensions.Http;
 using Serilog;
 using Serilog.Events;
-using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
+using InsightOps.Observability.Extensions;
+using InsightOps.Observability.Metrics;
+using InsightOps.Observability.Options;
+using InsightOps.Observability.SignalR;
 
 var builder = WebApplication.CreateBuilder(args);
-
-builder.Services.AddHealthChecks()
-    .AddCheck("self", () => HealthCheckResult.Healthy());
 
 // Configure Configuration Sources
 builder.Configuration
@@ -44,38 +38,56 @@ builder.Host.UseSerilog((hostingContext, loggerConfiguration) => {
             queueLimitBytes: null);
 });
 
+// Register Observability Services
+builder.Services.Configure<ObservabilityOptions>(
+    builder.Configuration.GetSection("Observability"));
+
+// Register SignalR Services (Fix for IHubContext issue)
+builder.Services.AddSignalR();
+
+// Register Metrics and Background Services
+builder.Services.AddSingleton<RealTimeMetricsCollector>();
+builder.Services.AddSingleton<SystemMetricsCollector>();
+builder.Services.AddSingleton<MetricsHub>();
+builder.Services.AddHostedService<MetricsBackgroundService>();
+
+// Add Centralized Observability
+builder.Services.AddInsightOpsObservability(
+    builder.Configuration,
+    "ApiGateway",
+    options => {
+        options.Common.ServiceName = "ApiGateway";
+        options.Common.MetricsEndpoint = "/metrics";
+        options.Common.HealthCheckEndpoint = "/health";
+    });
+
 // Configure Services
 builder.Services.AddControllers()
-    .AddJsonOptions(options =>
-    {
+    .AddJsonOptions(options => {
         options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
         options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
     });
 
 // Configure HTTP Clients with Resilience Patterns
-builder.Services.AddHttpClient("OrderService", client =>
-{
+builder.Services.AddHttpClient("OrderService", client => {
     client.BaseAddress = new Uri(builder.Configuration["ServiceUrls:OrderService"] ?? "http://orderservice:5012");
     client.DefaultRequestHeaders.Add("Accept", "application/json");
 })
 .AddPolicyHandler(GetRetryPolicy())
 .AddPolicyHandler(GetCircuitBreakerPolicy());
 
-builder.Services.AddHttpClient("InventoryService", client =>
-{
+builder.Services.AddHttpClient("InventoryService", client => {
     client.BaseAddress = new Uri(builder.Configuration["ServiceUrls:InventoryService"] ?? "http://inventoryservice:5013");
     client.DefaultRequestHeaders.Add("Accept", "application/json");
 })
 .AddPolicyHandler(GetRetryPolicy())
 .AddPolicyHandler(GetCircuitBreakerPolicy());
 
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowFrontend", corsBuilder =>
-    {
-        // Safely retrieve AllowedOrigins from configuration
+// Configure CORS
+builder.Services.AddCors(options => {
+    options.AddPolicy("AllowFrontend", corsBuilder => {
         var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>()
-                             ?? new[] { "http://localhost:5010" };
+                            ?? new[] { "http://localhost:5010" };
 
         corsBuilder
             .WithOrigins(allowedOrigins)
@@ -85,16 +97,19 @@ builder.Services.AddCors(options =>
     });
 });
 
-
 // Configure Health Checks
 builder.Services.AddHealthChecks()
-    .AddUrlGroup(new Uri($"{builder.Configuration["ServiceUrls:OrderService"]}/health"), name: "orders-service")
-    .AddUrlGroup(new Uri($"{builder.Configuration["ServiceUrls:InventoryService"]}/health"), name: "inventory-service");
+    .AddCheck("self", () => HealthCheckResult.Healthy())
+    .AddUrlGroup(new Uri($"{builder.Configuration["ServiceUrls:OrderService"]}/health"),
+                name: "orders-service",
+                failureStatus: HealthStatus.Degraded)
+    .AddUrlGroup(new Uri($"{builder.Configuration["ServiceUrls:InventoryService"]}/health"),
+                name: "inventory-service",
+                failureStatus: HealthStatus.Degraded);
 
 // Configure Swagger
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
-{
+builder.Services.AddSwaggerGen(c => {
     c.SwaggerDoc("v1", new OpenApiInfo
     {
         Title = "API Gateway Service",
@@ -103,58 +118,11 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// Configure OpenTelemetry
-builder.Services.AddOpenTelemetry()
-    .WithTracing(tracerProviderBuilder =>
-    {
-        tracerProviderBuilder
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddOtlpExporter(options =>
-            {
-                options.Endpoint = new Uri("http://tempo:4317");
-            })
-            .SetResourceBuilder(
-                ResourceBuilder.CreateDefault()
-                    .AddService("ApiGateway")
-                    .AddTelemetrySdk()
-                    .AddEnvironmentVariableDetector());
-    })
-    .WithMetrics(metricProviderBuilder =>
-    {
-        metricProviderBuilder
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddRuntimeInstrumentation()
-            .AddPrometheusExporter();
-    });
-
 var app = builder.Build();
 
-app.MapHealthChecks("/health", new HealthCheckOptions
-{
-    ResponseWriter = async (context, report) =>
-    {
-        context.Response.ContentType = "application/json";
-        var response = new
-        {
-            status = report.Status.ToString(),
-            checks = report.Entries.Select(x => new
-            {
-                name = x.Key,
-                status = x.Value.Status.ToString(),
-                description = x.Value.Description
-            })
-        };
-        await JsonSerializer.SerializeAsync(context.Response.Body, response);
-    }
-});
-
 // Configure Error Handling
-app.UseExceptionHandler(errorApp =>
-{
-    errorApp.Run(async context =>
-    {
+app.UseExceptionHandler(errorApp => {
+    errorApp.Run(async context => {
         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
         context.Response.ContentType = "application/json";
 
@@ -174,7 +142,25 @@ app.UseExceptionHandler(errorApp =>
     });
 });
 
-// Configure Development Tools
+// Health Checks Configuration
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = async (context, report) => {
+        context.Response.ContentType = "application/json";
+        var response = new
+        {
+            status = report.Status.ToString(),
+            checks = report.Entries.Select(x => new {
+                name = x.Key,
+                status = x.Value.Status.ToString(),
+                description = x.Value.Description
+            })
+        };
+        await JsonSerializer.SerializeAsync(context.Response.Body, response);
+    }
+});
+
+// Development Tools
 if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
 {
     app.UseSwagger(c => {
@@ -186,9 +172,15 @@ if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docke
     });
 }
 
-// Configure Middleware Pipeline
-app.UseSerilogRequestLogging(options =>
-{
+// Configure Pipeline
+app.UseRouting();
+app.UseCors("AllowFrontend");
+
+// Use Observability Middleware
+app.UseInsightOpsObservability();
+
+// Request Logging Middleware
+app.UseSerilogRequestLogging(options => {
     options.MessageTemplate = "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
     options.GetLevel = (httpContext, elapsed, ex) =>
         ex != null ? LogEventLevel.Error :
@@ -197,15 +189,11 @@ app.UseSerilogRequestLogging(options =>
         LogEventLevel.Information;
 });
 
-app.UseRouting();
-app.UseCors("AllowFrontend");
-
 // Map Endpoints
-app.UseEndpoints(endpoints =>
-{
+app.UseEndpoints(endpoints => {
     endpoints.MapControllers();
+    endpoints.MapHub<MetricsHub>("/metrics-hub");
     endpoints.MapHealthChecks("/health");
-    endpoints.MapPrometheusScrapingEndpoint("/metrics");
 });
 
 // Resilience Pattern Definitions
@@ -213,37 +201,26 @@ static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
 {
     return HttpPolicyExtensions
         .HandleTransientHttpError()
-        .WaitAndRetryAsync(
-            3,
-            retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
-            onRetry: (exception, timeSpan, retryCount, context) =>
-            {
-                Log.Warning(
-                    "Retry {RetryCount} after {RetryTime}s delay due to {ExceptionMessage}",
-                    retryCount,
-                    timeSpan.TotalSeconds,
-                    exception.Exception?.Message);
-            });
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
 }
 
 static IAsyncPolicy<HttpResponseMessage> GetCircuitBreakerPolicy()
 {
     return HttpPolicyExtensions
         .HandleTransientHttpError()
-        .CircuitBreakerAsync(
-            handledEventsAllowedBeforeBreaking: 5,
-            durationOfBreak: TimeSpan.FromSeconds(30),
-            onBreak: (exception, duration) =>
-            {
-                Log.Warning(
-                    "Circuit breaker opened for {DurationSeconds}s due to {ExceptionMessage}",
-                    duration.TotalSeconds,
-                    exception?.Exception?.Message);
-            },
-            onReset: () =>
-            {
-                Log.Information("Circuit breaker reset");
-            });
+        .CircuitBreakerAsync(5, TimeSpan.FromSeconds(30));
 }
 
-app.Run();
+try
+{
+    Log.Information("Starting API Gateway");
+    app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "API Gateway terminated unexpectedly");
+}
+finally
+{
+    Log.CloseAndFlush();
+}

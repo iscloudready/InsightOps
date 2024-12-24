@@ -59,6 +59,7 @@
 
 	<ItemGroup>
 		<!-- Reference to SharedModels -->
+		<ProjectReference Include="..\InsightOps.Observability\Observability.csproj" />
 		<ProjectReference Include="..\SharedModels\SharedModels.csproj" />
 	</ItemGroup>
 
