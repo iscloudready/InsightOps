@@ -1,4 +1,3 @@
-version: '3'
 
 x-logging: &default-logging
   driver: "json-file"
@@ -229,20 +228,18 @@ services:
       - Observability__Docker__Infrastructure__LokiUrl=http://loki:3100
       - Observability__Docker__Infrastructure__TempoEndpoint=http://tempo:4317
       - Observability__Docker__Infrastructure__PrometheusEndpoint=http://prometheus:9090
+      - DOCKER_HOST=npipe:////./pipe/docker_engine
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - //./pipe/docker_engine:/var/run/docker.sock
       - type: bind
         source: ${PROJECT_ROOT}/FrontendService/appsettings.Docker.json
         target: /app/appsettings.Docker.json
         read_only: true
-      - type: volume
-        source: keys_data
+      - type: bind
+        source: ${CONFIG_PATH}/Keys
         target: /app/Keys
-        volume:
-          nocopy: true
-    group_add:
-      - 999
-    user: appuser:docker
+    privileged: true
+    user: root
     ports:
       - "${FRONTEND_PORT:-5010}:80"
     depends_on:
@@ -250,12 +247,6 @@ services:
       - loki
       - tempo
       - prometheus
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
-      interval: 30s
-      timeout: 30s
-      retries: 3
-      start_period: 40s
 
 volumes:
   postgres_data:
