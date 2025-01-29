@@ -1,34 +1,76 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
 using InventoryService.Repositories;
-using InventoryService.Data; // Add this for DbInitializer
+using InventoryService.Data;
 using System.Reflection;
 using System.Text.Json;
 using InventoryService.Services;
 using InventoryService.Interfaces;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using InventoryService.Models;
 using Npgsql;
+using InsightOps.Observability.Extensions;
+using InsightOps.Observability.Metrics;
+using InsightOps.Observability.Options;
+using InsightOps.Observability.SignalR;
+using Polly;
+using Polly.Extensions.Http;
+using Polly.Timeout;
+using Serilog;
+using Microsoft.Extensions.Logging;
+using ILogger = Microsoft.Extensions.Logging.ILogger;
+
+static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
+{
+    return HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .Or<TimeoutRejectedException>()
+        .WaitAndRetryAsync(
+            retryCount: 3,
+            sleepDurationProvider: retryAttempt =>
+                TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
+            onRetry: (exception, timeSpan, retryCount, context) =>
+            {
+                Log.Warning(
+                    "Retry {RetryCount} after {RetryTime}s delay due to {ExceptionType}: {ExceptionMessage}",
+                    retryCount,
+                    timeSpan.TotalSeconds,
+                    exception.Exception?.GetType().Name,
+                    exception.Exception?.Message);
+            });
+}
+
+static IAsyncPolicy<HttpResponseMessage> GetCircuitBreakerPolicy()
+{
+    return HttpPolicyExtensions
+        .HandleTransientHttpError()
+        .CircuitBreakerAsync(
+            handledEventsAllowedBeforeBreaking: 5,
+            durationOfBreak: TimeSpan.FromSeconds(30),
+            onBreak: (exception, duration) =>
+            {
+                Log.Warning(
+                    "Circuit breaker opened for {DurationSec}s due to: {ExceptionMessage}",
+                    duration.TotalSeconds,
+                    exception.Exception?.Message);
+            },
+            onReset: () =>
+            {
+                Log.Information("Circuit breaker reset");
+            });
+}
 
 static async Task HandleDuplicateKeyViolation(DbContext context, PostgresException ex)
 {
-    // Add specific handling based on the table/constraint involved
-    if (ex.TableName == "InventoryItems" || ex.TableName == "Orders")
+    if (ex.TableName == "InventoryItems")
     {
         await context.Database.MigrateAsync();
     }
-    else
-    {
-        //throw; // Rethrow if we can't handle this specific violation
-    }
 }
 
-static async Task WaitForDatabase(InventoryDbContext context, ILogger logger, int maxRetries = 30)
+static async Task WaitForDatabase(InventoryDbContext context, ILogger<Program> logger, int maxRetries = 30)
 {
     for (int i = 0; i < maxRetries; i++)
     {
@@ -38,7 +80,7 @@ static async Task WaitForDatabase(InventoryDbContext context, ILogger logger, in
             logger.LogInformation("Successfully connected to database");
             return;
         }
-        catch (PostgresException ex) when (ex.SqlState == "57P03") // database is starting up
+        catch (PostgresException ex) when (ex.SqlState == "57P03")
         {
             logger.LogWarning("Database is starting up. Attempt {Attempt} of {MaxRetries}. Waiting 2 seconds...",
                 i + 1, maxRetries);
@@ -50,13 +92,15 @@ static async Task WaitForDatabase(InventoryDbContext context, ILogger logger, in
             throw;
         }
     }
-
     throw new TimeoutException("Database did not become available in time");
 }
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure swagger first
+// Configure Serilog first
+builder.Host.UseSerilog((context, config) =>
+   config.ReadFrom.Configuration(context.Configuration));
+
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo
@@ -71,281 +115,156 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 builder.Configuration
-    .SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
-    .AddEnvironmentVariables();
+   .SetBasePath(Directory.GetCurrentDirectory())
+   .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+   .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
+   .AddEnvironmentVariables();
 
-// Configure PostgreSQL Database connection with retry policy
-builder.Services.AddDbContext<InventoryDbContext>(options =>
+builder.Services.AddDbContext<InventoryDbContext>((serviceProvider, options) =>
 {
+    var logger = serviceProvider.GetRequiredService<ILogger<InventoryDbContext>>();
     var connectionString = builder.Configuration.GetConnectionString("Postgres");
     connectionString = $"{connectionString};SearchPath=inventory,public";
 
-    options.UseNpgsql(connectionString,
-        npgsqlOptionsAction: sqlOptions =>
-        {
-            sqlOptions.EnableRetryOnFailure(
-                maxRetryCount: 5,
-                maxRetryDelay: TimeSpan.FromSeconds(30),
-                errorCodesToAdd: null);
-            sqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "inventory");
-        });
+    options.UseNpgsql(connectionString, npgsqlOptions =>
+    {
+        npgsqlOptions.EnableRetryOnFailure(5, TimeSpan.FromSeconds(30), null);
+        npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "inventory");
+    });
 });
 
-// Add InventoryRepository as a scoped service
-// In Program.cs for both services
-builder.Services.AddScoped<IInventoryRepository, InventoryRepository>();
-builder.Services.AddScoped<InventoryService.Services.IInventoryService, InventoryService.Services.InventoryService>();
+// Register Observability Services
+builder.Services.Configure<ObservabilityOptions>(builder.Configuration.GetSection("Observability"));
+builder.Services.AddSingleton<RealTimeMetricsCollector>();
+builder.Services.AddSingleton<SystemMetricsCollector>();
 
-// Add Authorization services
-builder.Services.AddAuthorization();
+// Configure SignalR
+builder.Services.AddSignalR(options =>
+{
+    var signalRConfig = builder.Configuration.GetSection("SignalR").Get<SignalROptions>();
+    options.EnableDetailedErrors = signalRConfig?.DetailedErrors ?? true;
+    options.MaximumReceiveMessageSize = signalRConfig?.MaximumReceiveMessageSize ?? 102400;
+});
 
-builder.Services.AddControllers();
+// Add centralized observability
+builder.Services.AddInsightOpsObservability(
+   builder.Configuration,
+   "InventoryService",
+   options =>
+   {
+       options.Common.ServiceName = "InventoryService";
+   });
 
-builder.Services.AddHealthChecks()
-    .AddCheck("self", () => HealthCheckResult.Healthy());
+// Add metrics background service
+builder.Services.AddHostedService<MetricsBackgroundService>();
 
-// Configure Swagger
-builder.Services.AddEndpointsApiExplorer();
-
-// Configure HttpClient for the InventoryService
 builder.Services.AddHttpClient("InventoryService", client =>
 {
-    client.BaseAddress = new Uri("http://apigateway:7237");
-});
+    var baseUrl = builder.Configuration["ServiceUrls:ApiGateway"] ?? "http://apigateway:7237";
+    client.BaseAddress = new Uri(baseUrl);
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+    client.Timeout = TimeSpan.FromSeconds(30);
+})
+.AddPolicyHandler(GetRetryPolicy())
+.AddPolicyHandler(GetCircuitBreakerPolicy());
 
-// Add OpenTelemetry for both Metrics and Tracing
-builder.Services.AddOpenTelemetry()
-    .WithTracing(tracerProviderBuilder =>
-    {
-        tracerProviderBuilder
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddOtlpExporter(options =>
-            {
-                options.Endpoint = new Uri("http://localhost:4317"); // Adjust based on OTLP endpoint (e.g., Tempo)
-            })
-            .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("InventoryService"));
-    })
-    .WithMetrics(metricProviderBuilder =>
-    {
-        metricProviderBuilder
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddRuntimeInstrumentation()
-            .AddPrometheusExporter();
-    });
+builder.Services.AddScoped<IInventoryRepository, InventoryRepository>();
+builder.Services.AddScoped<IInventoryService, InventoryService.Services.InventoryService>();
+builder.Services.AddControllers();
+builder.Services.AddAuthorization();
 
-// Build and configure the app
+builder.Services.AddHealthChecks()
+   .AddUrlGroup(
+       new Uri($"{builder.Configuration["ServiceUrls:ApiGateway"]}/health"),
+       name: "apigateway-check",
+       failureStatus: HealthStatus.Degraded,
+       timeout: TimeSpan.FromSeconds(5));
+
 var app = builder.Build();
-
-app.MapHealthChecks("/health", new HealthCheckOptions
-{
-    ResponseWriter = async (context, report) =>
-    {
-        context.Response.ContentType = "application/json";
-        var response = new
-        {
-            status = report.Status.ToString(),
-            checks = report.Entries.Select(x => new
-            {
-                name = x.Key,
-                status = x.Value.Status.ToString(),
-                description = x.Value.Description
-            })
-        };
-        await JsonSerializer.SerializeAsync(context.Response.Body, response);
-    }
-});
 
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
     var logger = services.GetRequiredService<ILogger<Program>>();
-    InventoryDbContext context = null;  // Declare context outside try block
+    InventoryDbContext context = null;
 
     try
     {
-        logger.LogInformation("Starting inventory database initialization...");
+        logger.LogInformation("Starting database initialization...");
         context = services.GetRequiredService<InventoryDbContext>();
-
-        // Create schema and set search path with better error handling
+        await WaitForDatabase(context, logger);
         await context.Database.ExecuteSqlRawAsync("CREATE SCHEMA IF NOT EXISTS inventory;");
         await context.Database.ExecuteSqlRawAsync("SET search_path TO inventory,public;");
 
-        // Create migration history table without trying to move data
-        try
-        {
-            await context.Database.ExecuteSqlRawAsync(@"
-            CREATE TABLE IF NOT EXISTS inventory.__EFMigrationsHistory (
-                MigrationId character varying(150) NOT NULL,
-                ProductVersion character varying(32) NOT NULL,
-                CONSTRAINT PK___EFMigrationsHistory PRIMARY KEY (MigrationId)
-            );");
-        }
-        catch (PostgresException pgEx) when (pgEx.SqlState == "42P07")
-        {
-            logger.LogInformation("Migration history table already exists");
-        }
-
-        // First check database connectivity
         if (!(await context.Database.CanConnectAsync()))
         {
-            logger.LogInformation("Database connection not established. Creating database...");
             await context.Database.EnsureCreatedAsync();
         }
 
-        // Check for pending migrations
-        var pendingMigrations = await context.Database.GetPendingMigrationsAsync();
-        var pendingMigrationsList = pendingMigrations.ToList();
+        await context.Database.ExecuteSqlRawAsync(@"
+       CREATE TABLE IF NOT EXISTS inventory.__EFMigrationsHistory (
+           MigrationId character varying(150) NOT NULL,
+           ProductVersion character varying(32) NOT NULL,
+           CONSTRAINT PK___EFMigrationsHistory PRIMARY KEY (MigrationId)
+       );");
 
-        if (pendingMigrationsList.Any())
+        var pendingMigrations = (await context.Database.GetPendingMigrationsAsync()).ToList();
+        if (pendingMigrations.Any())
         {
-            logger.LogInformation("Found {Count} pending inventory migrations: {@Migrations}",
-                pendingMigrationsList.Count,
-                pendingMigrationsList);
-
-            try
-            {
-                // Ensure we're in the correct schema before migration
-                await context.Database.ExecuteSqlRawAsync("SET search_path TO inventory;");
-                await context.Database.MigrateAsync();
-                logger.LogInformation("Successfully applied inventory database migrations");
-            }
-            catch (PostgresException pgEx) when (pgEx.SqlState == "23505")
-            {
-                // Handle duplicate key violations during migration
-                logger.LogWarning("Duplicate key detected during migration. Attempting cleanup...");
-
-                // Try to clean up any existing data with correct schema
-                await context.Database.ExecuteSqlRawAsync(@"
-                DO $$
-                BEGIN
-                    IF EXISTS (
-                        SELECT 1 
-                        FROM information_schema.tables 
-                        WHERE table_schema = 'inventory' 
-                        AND table_name = 'InventoryItems'
-                    ) THEN
-                        TRUNCATE TABLE inventory.""InventoryItems"" CASCADE;
-                    END IF;
-                END $$;");
-
-                await context.Database.MigrateAsync();
-            }
+            await context.Database.MigrateAsync();
         }
 
-        // Check if we need to seed data
-        var hasData = await context.InventoryItems.AnyAsync();  //await context.Database.ExecuteSqlRawAsync(@"
-        //SELECT EXISTS (
-        //    SELECT 1 FROM inventory.""InventoryItems"" LIMIT 1
-        //)");
-
-        if (!hasData)
+        if (!await context.InventoryItems.AnyAsync())
         {
-            logger.LogInformation("Initializing inventory seed data...");
-
             var items = new List<InventoryItem>
-        {
-            new InventoryItem
-            {
-                Name = "Sample Item 1",
-                Quantity = 100,
-                Price = 9.99m,
-                MinimumQuantity = 20,
-                LastRestocked = DateTime.UtcNow
-            },
-            new InventoryItem
-            {
-                Name = "Sample Item 2",
-                Quantity = 50,
-                Price = 19.99m,
-                MinimumQuantity = 10,
-                LastRestocked = DateTime.UtcNow
-            },
-            new InventoryItem
-            {
-                Name = "Sample Item 3",
-                Quantity = 75,
-                Price = 14.99m,
-                MinimumQuantity = 15,
-                LastRestocked = DateTime.UtcNow
-            }
-        };
+           {
+               new InventoryItem
+               {
+                   Name = "Sample Item 1",
+                   Quantity = 100,
+                   Price = 9.99m,
+                   MinimumQuantity = 20,
+                   LastRestocked = DateTime.UtcNow
+               },
+               new InventoryItem
+               {
+                   Name = "Sample Item 2",
+                   Quantity = 50,
+                   Price = 19.99m,
+                   MinimumQuantity = 10,
+                   LastRestocked = DateTime.UtcNow
+               }
+           };
 
-            try
-            {
-                await context.InventoryItems.AddRangeAsync(items);
-                await context.SaveChangesAsync();
-                logger.LogInformation("Successfully seeded {Count} inventory items", items.Count);
-            }
-            catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-            {
-                logger.LogWarning("Duplicate items detected during seeding. Skipping seed data.");
-            }
+            await context.InventoryItems.AddRangeAsync(items);
+            await context.SaveChangesAsync();
         }
-        else
-        {
-            logger.LogInformation("Inventory database already contains data. Skipping seed initialization.");
-        }
-
-        // Verify data integrity with explicit schema
-        var itemCount = await context.Database.ExecuteSqlRawAsync(@"
-        SELECT COUNT(*) FROM inventory.""InventoryItems""");
-        logger.LogInformation("Current inventory contains {Count} items", itemCount);
     }
     catch (PostgresException pgEx)
     {
-        logger.LogError(pgEx, "PostgreSQL error during inventory database initialization. Error Code: {ErrorCode}, Detail: {Detail}",
-            pgEx.SqlState,
-            pgEx.Detail);
-
-        switch (pgEx.SqlState)
+        logger.LogError(pgEx, "PostgreSQL error during initialization");
+        if (context != null)
         {
-            case "42P07": // Table already exists
-                logger.LogInformation("Schema objects already exist, continuing with migrations...");
-                await context.Database.MigrateAsync();
-                break;
-            case "23505": // Unique violation
-                logger.LogWarning("Duplicate key detected during initialization, attempting recovery...");
-                await HandleDuplicateKeyViolation(context, pgEx);
-                break;
-            case "42P06": // Schema already exists
-                logger.LogInformation("Schema already exists, continuing...");
-                break;
-            case "42P01": // Relation does not exist
-                logger.LogWarning("Relations not found, attempting to create...");
-                await context.Database.MigrateAsync();
-                break;
-            default:
-                throw;
+            switch (pgEx.SqlState)
+            {
+                case "42P07":
+                case "23505":
+                    await HandleDuplicateKeyViolation(context, pgEx);
+                    break;
+                case "42P06":
+                    logger.LogInformation("Schema already exists");
+                    break;
+                case "57P03":
+                    await WaitForDatabase(context, logger);
+                    break;
+                default:
+                    throw;
+            }
         }
+        else throw;
     }
 }
 
-app.UseExceptionHandler(errorApp =>
-{
-    errorApp.Run(async context =>
-{
-    context.Response.StatusCode = 500;
-    context.Response.ContentType = "application/json";
-    var error = context.Features.Get<IExceptionHandlerFeature>();
-    if (error != null)
-    {
-        await context.Response.WriteAsync(
-            JsonSerializer.Serialize(new { error = "An error occurred." }));
-    }
-});
-});
-
-// Map Prometheus endpoint for scraping metrics
-app.MapPrometheusScrapingEndpoint("/metrics");
-
-// Map health check endpoint
-app.MapHealthChecks("/health");
-
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
 {
     app.UseSwagger();
@@ -357,9 +276,54 @@ if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docke
 }
 
 app.UseRouting();
+app.UseInsightOpsObservability();
+app.UseAuthorization();
+
 app.UseEndpoints(endpoints =>
 {
     endpoints.MapControllers();
+    endpoints.MapHub<MetricsHub>("/metrics-hub");
+    endpoints.MapHealthChecks("/health", new HealthCheckOptions
+    {
+        ResponseWriter = async (context, report) =>
+        {
+            context.Response.ContentType = "application/json";
+            var response = new
+            {
+                status = report.Status.ToString(),
+                totalDuration = report.TotalDuration.TotalMilliseconds,
+                checks = report.Entries.Select(x => new
+                {
+                    name = x.Key,
+                    status = x.Value.Status.ToString(),
+                    duration = x.Value.Duration.TotalMilliseconds,
+                    description = x.Value.Description,
+                    error = x.Value.Exception?.Message
+                }).ToList()
+            };
+
+            var options = new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            };
+
+            await System.Text.Json.JsonSerializer.SerializeAsync(context.Response.Body, response, options);
+        }
+    });
 });
 
-app.Run();
+try
+{
+    Log.Information("Starting InventoryService...");
+    await app.RunAsync();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Application failed to start");
+    throw;
+}
+finally
+{
+    Log.CloseAndFlush();
+}
